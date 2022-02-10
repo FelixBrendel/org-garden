@@ -8,8 +8,11 @@
 ;;  - [X] Highlight todos in code
 ;;  - [X] Fragtog delay super high
 ;;  - [X] Magit ?
-;;  - [ ] Fixed Dir locals such that nice headers in vault
-
+;;  - [X] Fixed Dir locals such that nice headers in vault
+;;  - [X] Org bullets for non vault org
+;;  - [X] More packages for latex preview
+;;  - [ ] bind C-o to embark-export in vertico mode
+;;  - [ ] latex scale to small
 
 ;; Some functionality uses this to identify you, e.g. GPG configuration, email
 ;; clients, file templates and snippets.
@@ -49,7 +52,7 @@
         "~$"
         "^#.*#$"
         "^\\.archives$"
-        "\\.\\(?:db\\|db-shm\\|db-wal\\|log\\|orgids\\|projectile\\)$"))
+        "\\.\\(?:db\\|db-shm\\|db-wal\\|log\\|orgids\\|projectile\\|dir-locals.el\\)$"))
   (neo-show-hidden-files nil))
 
 
@@ -288,7 +291,6 @@ Performs a database upgrade when required."
 (setq org-startup-indented t
       org-startup-with-latex-preview t
       org-startup-with-inline-images t
-      org-bullets-bullet-list '(" ") ;; no bullets, needs org-bullets package
       org-fontify-whole-heading-line t
       org-fontify-quote-and-verse-blocks t
       org-hide-emphasis-markers t
@@ -297,9 +299,11 @@ Performs a database upgrade when required."
 (with-eval-after-load 'org
   (setq org-format-latex-options
        '(:foreground default :background default :scale 2 :html-foreground "Black" :html-background "Transparent" :html-scale 1.0 :matchers
-                     ("begin" "$1" "$" "$$" "\\(" "\\["))))
+                     ("begin" "$1" "$" "$$" "\\(" "\\[")))
 
-
+  (setq org-roam-completion-everywhere t)
+  (add-to-list 'org-latex-packages-alist '("" "tikz" t))
+  (add-to-list 'org-latex-packages-alist '("" "pgfplots" t)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -482,10 +486,33 @@ This function makes sure that dates are aligned for easy reading."
 (switch-to-buffer "*doom*")
 (delete-other-windows)
 
-(custom-set-faces
- '(org-document-title ((t (:weight bold :height 2.4 :family "Times New Roman"))))
- '(org-level-1 ((t (:inherit outline-1  :height 2.0 :family "Times New Roman"))))
- '(org-level-2 ((t (:inherit outline-2  :height 1.8 :family "Times New Roman"))))
- '(org-level-3 ((t (:inherit outline-3  :height 1.6 :family "Times New Roman"))))
- '(org-level-4 ((t (:inherit outline-4  :height 1.4 :family "Times New Roman"))))
- '(org-level-5 ((t (:inherit outline-5  :height 1.2 :family "Times New Roman")))))
+
+(setq org-preview-latex-process-alist
+      '((dvipng :programs
+                ("latex" "dvipng")
+                :description "dvi > png" :message "you need to install the programs: latex and dvipng." :image-input-type "dvi" :image-output-type "png" :image-size-adjust
+                (1.0 . 1.0)
+                :latex-compiler
+                ("latex -interaction nonstopmode -output-directory %o %f")
+                :image-converter
+                ("dvipng -D %D -T tight -o %O %f")
+                :transparent-image-converter
+                ("dvipng -D %D -T tight -bg Transparent -o %O %f"))
+        (dvisvgm :programs
+                 ("latex" "dvisvgm")
+                 :description "dvi > svg" :message "you need to install the programs: latex and dvisvgm." :image-input-type "dvi" :image-output-type "svg" :image-size-adjust
+                 (1.7 . 1.5)
+                 :latex-compiler
+                 ("latex -interaction nonstopmode -output-directory %o %f")
+                 :image-converter
+                 ("dvisvgm %f -n -b min -c %S -o %O"))
+        (imagemagick :programs
+                     ("latex" "convert")
+                     :description "pdf > png" :message "you need to install the programs: latex and imagemagick." :image-input-type "pdf" :image-output-type "png" :image-size-adjust
+                     (1.0 . 1.0)
+                     :latex-compiler
+                     ("pdflatex -interaction nonstopmode -output-directory %o %f")
+                     :image-converter
+                     ("convert -density %D -trim -antialias %f -quality 100 %O"))))
+
+(setq org-preview-latex-default-process 'imagemagick)
