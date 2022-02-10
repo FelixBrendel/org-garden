@@ -11,8 +11,9 @@
 ;;  - [X] Fixed Dir locals such that nice headers in vault
 ;;  - [X] Org bullets for non vault org
 ;;  - [X] More packages for latex preview
-;;  - [ ] bind C-o to embark-export in vertico mode
-;;  - [ ] latex scale to small
+;;  - [X] bind C-o to embark-export in vertico mode
+;;  - [X] latex scale to small
+;;  - [X] roam find not listing tags
 
 ;; Some functionality uses this to identify you, e.g. GPG configuration, email
 ;; clients, file templates and snippets.
@@ -211,6 +212,9 @@ Performs a database upgrade when required."
     ;; else
     (mc--mark-symbol-at-point)))
 
+(map! :map vertico-map
+      "C-o" 'embark-export)
+
 (map! "C-s"         'consult-line
       "C-j"         'join-line
       "C-d"         'mark-word-or-next-word-like-this
@@ -297,13 +301,21 @@ Performs a database upgrade when required."
       org-highlight-latex-and-related '(latex))
 
 (with-eval-after-load 'org
-  (setq org-format-latex-options
-       '(:foreground default :background default :scale 2 :html-foreground "Black" :html-background "Transparent" :html-scale 1.0 :matchers
-                     ("begin" "$1" "$" "$$" "\\(" "\\[")))
-
   (setq org-roam-completion-everywhere t)
+  (setq org-roam-node-display-template "${title:*}${tags}")
+
   (add-to-list 'org-latex-packages-alist '("" "tikz" t))
   (add-to-list 'org-latex-packages-alist '("" "pgfplots" t)))
+
+;; NOTE(Felix): we gotta set org-format-latex-options here after requiring org,
+;;   otherwise if we use with-eval-after-load, it would only get loaded after we
+;;   open the first org file, which at load time would already try to latex
+;;   compile the fragments, before executing the `setq org-format-latex-options'
+;;   it seems ...
+(require 'org)
+(setq org-format-latex-options
+        '(:foreground default :background default :scale 2 :html-foreground "Black" :html-background "Transparent" :html-scale 1.0 :matchers
+                      ("begin" "$1" "$" "$$" "\\(" "\\[")))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
