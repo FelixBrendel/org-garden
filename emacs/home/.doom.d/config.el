@@ -4,6 +4,13 @@
 ;; sync' after modifying this file!
 
 
+;; NOTE(Felix): Todos left
+;;  - [X] Highlight todos in code
+;;  - [X] Fragtog delay super high
+;;  - [X] Magit ?
+;;  - [ ] Fixed Dir locals such that nice headers in vault
+
+
 ;; Some functionality uses this to identify you, e.g. GPG configuration, email
 ;; clients, file templates and snippets.
 (setq user-full-name "Felix Brendel"
@@ -30,11 +37,20 @@
 ;; `load-theme' function. This is the default:
 (setq doom-theme 'doom-miramare)
 
-
 (use-package! neotree
   :custom
-  (doom-themes-neotree-enable-variable-pitch t)
-  (doom-themes-neotree-file-icons 'fancy))
+  (doom-themes-neotree-enable-variable-pitch nil)
+  (doom-themes-neotree-file-icons 'fancy)
+  (neo-hidden-regexp-list
+      '("^\\.\\(?:git\\|hg\\|svn\\)$"
+        "\\.\\(?:pyc\\|o\\|elc\\|lock\\|css.map\\|class\\)$"
+        "^\\(?:node_modules\\|vendor\\|.\\(project\\|cask\\|yardoc\\|sass-cache\\)\\)$"
+        "^\\.\\(?:sync\\|export\\|attach\\)$"
+        "~$"
+        "^#.*#$"
+        "^\\.archives$"
+        "\\.\\(?:db\\|db-shm\\|db-wal\\|log\\|orgids\\|projectile\\)$"))
+  (neo-show-hidden-files nil))
 
 
 ;; If you use `org' and don't want your org files in the default location below,
@@ -62,11 +78,11 @@
 ;;
 ;; You can also try 'gd' (or 'C-c c d') to jump to their definition and see how
 ;; they are implemented.
-(use-package! ivy-posframe
-  :config
-  (setq ivy-posframe-display-functions-alist
-      '((t . ivy-posframe-display-at-frame-center)))
-  (ivy-posframe-mode 1))
+;; (use-package! ivy-posframe
+;;   :config
+;;   (setq ivy-posframe-display-functions-alist
+;;       '((t . ivy-posframe-display-at-frame-center)))
+;;  (ivy-posframe-mode 1))
 
 (use-package! company-posframe
   :defer t
@@ -75,7 +91,13 @@
 
 (use-package! valign)
 
-(use-package! org-fragtog :defer t)
+(use-package org-fragtog
+  :custom (org-fragtog-preview-delay 99999999999999999)
+  :bind   (:map org-mode-map ("<f2>" . org-toggle-latex-fragment))
+  :hook   (org-mode . org-fragtog-mode))
+
+
+
 (use-package! org-roam
   :init
   (add-to-list 'display-buffer-alist
@@ -100,6 +122,52 @@
          :map org-mode-map
          ("C-M-i" . completion-at-point))
   :config
+  ;; NOTE(Felix): hopefullly teporary fix 
+  (progn
+    (require 'emacsql-sqlite3)
+    (defun org-roam-db ()
+      "Entrypoint to the Org-roam sqlite database.
+Initializes and stores the database, and the database connection.
+Performs a database upgrade when required."
+      (unless (and (org-roam-db--get-connection)
+                   (emacsql-live-p (org-roam-db--get-connection)))
+        (let ((init-db (not (file-exists-p org-roam-db-location))))
+          (make-directory (file-name-directory org-roam-db-location) t)
+          ;; (let ((conn (emacsql-sqlite org-roam-db-location)))
+          (let ((conn (emacsql-sqlite3 org-roam-db-location)))
+            (emacsql conn [:pragma (= foreign_keys ON)])
+            (set-process-query-on-exit-flag (emacsql-process conn) nil)
+            (puthash (expand-file-name org-roam-directory)
+                     conn
+                     org-roam-db--connection)
+            (when init-db
+              (org-roam-db--init conn))
+            (let* ((version (caar (emacsql conn "PRAGMA user_version")))
+                   (version (org-roam-db--upgrade-maybe conn version)))
+              (cond
+               ((> version org-roam-db-version)
+                (emacsql-close conn)
+                (user-error
+                 "The Org-roam database was created with a newer Org-roam version.  "
+                 "You need to update the Org-roam package"))
+               ((< version org-roam-db-version)
+                (emacsql-close conn)
+                (error "BUG: The Org-roam database scheme changed %s"
+                       "and there is no upgrade path")))))))
+      (org-roam-db--get-connection))
+    (defun org-roam-db--init (db)
+      "Initialize database DB with the correct schema and user version."
+      (emacsql-with-transaction db
+        ;; (emacsql db "PRAGMA foreign_keys = ON")
+        (emacsql db [:pragma (= foreign_keys ON)])
+        (pcase-dolist (`(,table ,schema) org-roam-db--table-schemata)
+          (emacsql db [:create-table $i1 $S2] table schema))
+        (pcase-dolist (`(,index-name ,table ,columns) org-roam-db--table-indices)
+          (emacsql db [:create-index $i1 :on $i2 $S3] index-name table columns))
+        (emacsql db (format "PRAGMA user_version = %s" org-roam-db-version))))
+    )
+
+  
   (org-roam-setup))
 
 (use-package! websocket   :after org-roam)
@@ -140,14 +208,19 @@
     ;; else
     (mc--mark-symbol-at-point)))
 
-(map! "C-s"         'swiper
+(map! "C-s"         'consult-line
       "C-j"         'join-line
       "C-d"         'mark-word-or-next-word-like-this
       "C-S-d"       'duplicate-line
       "C-S-c C-S-c" 'mc/edit-lines
       "<f1>"        '+doom-dashboard/open
       "C-r"         'org-roam-node-insert
-      "C-o"         'org-roam-node-find)
+      "C-o"         'org-roam-node-find
+      "C-c f p" 'doom/find-file-in-private-config
+      )
+
+(map! :map global-map
+      "C-c f p" 'doom/find-file-in-private-config)
 
 (map! :map org-mode-map
       "C-r"  'org-roam-node-insert
@@ -217,8 +290,8 @@
       org-startup-with-inline-images t
       org-bullets-bullet-list '(" ") ;; no bullets, needs org-bullets package
       org-fontify-whole-heading-line t
-      org-hide-emphasis-markers t
       org-fontify-quote-and-verse-blocks t
+      org-hide-emphasis-markers t
       org-highlight-latex-and-related '(latex))
 
 (with-eval-after-load 'org
