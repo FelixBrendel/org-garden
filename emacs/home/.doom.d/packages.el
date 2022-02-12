@@ -51,6 +51,8 @@
 
 (package! company-posframe)
 (package! org-fragtog)
+(package! biblio)
+(package! ox-hugo)
 
 (package! emacsql-sqlite3)
 (unpin! org-roam)

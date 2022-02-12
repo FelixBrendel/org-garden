@@ -7,13 +7,20 @@
 ;; NOTE(Felix): Todos left
 ;;  - [X] Highlight todos in code
 ;;  - [X] Fragtog delay super high
-;;  - [X] Magit ?
+;;  - [X] Magit
 ;;  - [X] Fixed Dir locals such that nice headers in vault
 ;;  - [X] Org bullets for non vault org
 ;;  - [X] More packages for latex preview
 ;;  - [X] bind C-o to embark-export in vertico mode
 ;;  - [X] latex scale to small
 ;;  - [X] roam find not listing tags
+;;  - [X] make C-c f p work
+;;  - [X] startup opening neotree correctly
+;;  - [X] intall biblio
+;;  - [ ] org roam capture templates
+;;  - [ ] org roam -> .bib file
+;;  - [ ] knowledge base export
+
 
 ;; Some functionality uses this to identify you, e.g. GPG configuration, email
 ;; clients, file templates and snippets.
@@ -82,11 +89,6 @@
 ;;
 ;; You can also try 'gd' (or 'C-c c d') to jump to their definition and see how
 ;; they are implemented.
-;; (use-package! ivy-posframe
-;;   :config
-;;   (setq ivy-posframe-display-functions-alist
-;;       '((t . ivy-posframe-display-at-frame-center)))
-;;  (ivy-posframe-mode 1))
 
 (use-package! company-posframe
   :defer t
@@ -94,6 +96,8 @@
   (company-posframe-mode 1))
 
 (use-package! valign)
+
+(use-package! biblio)
 
 (use-package org-fragtog
   :custom (org-fragtog-preview-delay 99999999999999999)
@@ -223,11 +227,15 @@ Performs a database upgrade when required."
       "<f1>"        '+doom-dashboard/open
       "C-r"         'org-roam-node-insert
       "C-o"         'org-roam-node-find
-      "C-c f p" 'doom/find-file-in-private-config
       )
 
+;; NOTE(Felix): make C-c f p not throw errors by rebinding it
+(unbind-key "p" doom-leader-file-map)
+(unbind-key "C-c f p" global-map)
+(unbind-key "f p" mode-specific-map)
+(map!  "C-c f p"     'doom/open-private-config)
 (map! :map global-map
-      "C-c f p" 'doom/find-file-in-private-config)
+      "C-c f p" 'doom/open-private-config)
 
 (map! :map org-mode-map
       "C-r"  'org-roam-node-insert
@@ -292,6 +300,14 @@ Performs a database upgrade when required."
 (add-hook 'org-mode-hook 'org-bullets-mode)
 (add-hook 'org-mode-hook (lambda () (setq fill-column 75)))
 
+;; NOTE(Felix): This is a fix for org mode hanging indefinetly when saving the
+;;   buffer because doom emacs adds a hook to org-encrypt-entries on save which
+;;   seems to hang indefinitely (org mode bug maybe)
+;;   https://github.com/hlissner/doom-emacs/issues/5924
+(add-hook 'org-mode-hook (lambda () (remove-hook 'before-save-hook 'org-encrypt-entries t)) 100)
+
+
+
 (setq org-startup-indented t
       org-startup-with-latex-preview t
       org-startup-with-inline-images t
@@ -304,8 +320,10 @@ Performs a database upgrade when required."
   (setq org-roam-completion-everywhere t)
   (setq org-roam-node-display-template "${title:*}${tags}")
 
-  (add-to-list 'org-latex-packages-alist '("" "tikz" t))
-  (add-to-list 'org-latex-packages-alist '("" "pgfplots" t)))
+
+  ;;(add-to-list 'org-latex-packages-alist '("" "tikz" t))
+  ;;(add-to-list 'org-latex-packages-alist '("" "pgfplots" t))
+  )
 
 ;; NOTE(Felix): we gotta set org-format-latex-options here after requiring org,
 ;;   otherwise if we use with-eval-after-load, it would only get loaded after we
@@ -316,6 +334,7 @@ Performs a database upgrade when required."
 (setq org-format-latex-options
         '(:foreground default :background default :scale 2 :html-foreground "Black" :html-background "Transparent" :html-scale 1.0 :matchers
                       ("begin" "$1" "$" "$$" "\\(" "\\[")))
+(setq org-preview-latex-image-directory "./images/latex/")
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -489,16 +508,6 @@ This function makes sure that dates are aligned for easy reading."
     (setq lang :de)))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-;; startup
-(neotree-toggle)
-(neotree-dir "~/../../org/")
-(neotree-refresh)
-(switch-to-buffer "*doom*")
-(delete-other-windows)
-
-
 (setq org-preview-latex-process-alist
       '((dvipng :programs
                 ("latex" "dvipng")
@@ -528,3 +537,145 @@ This function makes sure that dates are aligned for easy reading."
                      ("convert -density %D -trim -antialias %f -quality 100 %O"))))
 
 (setq org-preview-latex-default-process 'imagemagick)
+
+
+(progn
+  ;; Org publish stuff for garden
+  (require 'ox-publish)
+  (use-package! ox-hugo
+    :custom
+    (org-hugo-auto-set-lastmod t)
+    )
+
+  (with-eval-after-load 'org-roam
+    (defun org-hugo-publish (plist filename pub-dir)
+      ;; (print plist)
+      ;; (print filename)
+      ;; (print pub-dir)
+      ;;
+      ;; (:base-directory "~/../../org/vault/" :base-extension "org" :publishing-directory "~/public_html/" :recursive t :publishing-function org-hugo-publish :headline-levels 4 :auto-preamble t)
+      ;; "d:/Programme/org-roam/org/vault/Uni/Deep Learning/voxnet.org"
+      ;; "d:/Programme/org-roam/emacs/home/public_html/Uni/Deep Learning/"
+
+      (unless (string= "setupfile" (file-name-base filename))
+        (with-current-buffer (find-file filename)
+          (setq org-hugo-base-dir "~/public_html/")
+          (let* ((abs-path-vault     (expand-file-name (plist-get plist :base-directory)))
+                 (abs-path-vault-len (length abs-path-vault))
+                 (abs-path-org-file  (file-name-directory filename))
+                 (added-path         (substring abs-path-org-file abs-path-vault-len)))
+
+            ;;(print abs-path-org-file)
+            ;;(print added-path)
+            ;;
+            ;;"d:/Programme/org-roam/org/vault/Uni/Graphics/"
+            ;;"Uni/Graphics/"
+
+            (let ((org-hugo-section added-path))
+              (org-hugo-export-wim-to-md :all-subtrees nil nil nil))))))
+
+    (setq org-publish-project-alist
+          `(
+            ("garden-org"
+             :base-directory ,org-roam-directory
+             :base-extension "org"
+             :publishing-directory "~/public_html/"
+             :recursive t
+             :publishing-function org-hugo-publish
+             :headline-levels 4             ; Just the default for this project.
+             :auto-preamble t
+             )
+            ("garden-static"
+             :base-directory ,org-roam-directory
+             :base-extension "png\\|jpg\\|svg"
+             :publishing-directory "~/public_html/"
+             :recursive t
+             :publishing-function org-publish-attachment
+             )
+            ("garden" :components ("garden-org"
+                                   ;;"garden-static"
+                                   ))
+            ))
+
+    (defun publish-garden ()
+      (interactive)
+      (setq org-startup-with-latex-preview nil)
+      (org-roam-update-org-id-locations)
+      (org-publish-project "garden")
+      (setq org-startup-with-latex-preview t)
+      (message "Publish Done!"))
+    ))
+
+
+;; (require 'org)
+;; (add-to-list 'org-latex-default-packages-alist '("" "tikz"     t) t)
+;; (add-to-list 'org-latex-default-packages-alist '("" "pgfplots" t) t)
+;; (add-to-list 'org-latex-default-packages-alist '("" "qcircuit" t) t)
+;; (add-to-list 'org-latex-default-packages-alist '("" "braket" t) t)
+;; (add-to-list 'org-latex-default-packages-alist '("" "blochsphere" t) t)
+
+;; (setq org-babel-latex-preamble
+;;       (lambda (_)
+;;         "\\documentclass{article}
+
+;; \\usepackage[usenames]{color}
+;; \\usepackage[utf8]{inputenc}
+;; \\usepackage[T1]{fontenc}
+;; \\usepackage{graphicx}
+;; \\usepackage{longtable}
+;; \\usepackage{wrapfig}
+;; \\usepackage{rotating}
+;; \\usepackage[normalem]{ulem}
+;; \\usepackage{amsmath}
+;; \\usepackage{amssymb}
+;; \\usepackage{capt-of}
+;; \\usepackage{tikz}
+;; \\usetikzlibrary{arrows.meta}
+;; \\usepackage{pgfplots}
+;; \\usepackage{qcircuit}
+;; \\usepackage{braket}
+;; \\usepackage{blochsphere}
+
+;; \\pgfplotsset{compat=1.18}
+;; \\pagestyle{empty}             % do not remove
+
+
+;; % The settings below are copied from fullpage.sty
+;; \\setlength{\\textwidth}{\\paperwidth}
+;; \\addtolength{\\textwidth}{-3cm}
+;; \\setlength{\\oddsidemargin}{1.5cm}
+;; \\addtolength{\\oddsidemargin}{-2.54cm}
+;; \\setlength{\\evensidemargin}{\\oddsidemargin}
+;; \\setlength{\\textheight}{\\paperheight}
+;; \\addtolength{\\textheight}{-\\headheight}
+;; \\addtolength{\\textheight}{-\\headsep}
+;; \\addtolength{\\textheight}{-\\footskip}
+;; \\addtolength{\\textheight}{-3cm}
+;; \\setlength{\\topmargin}{1.5cm}
+;; \\addtolength{\\topmargin}{-2.54cm}
+;; "))
+
+;; (setq org-latex-pdf-process
+;;       '("%latex -interaction nonstopmode -output-directory %o %f"
+;;       "%latex -interaction nonstopmode -output-directory %o %f"
+;;       "%latex -interaction nonstopmode -output-directory %o %f"))
+
+(with-eval-after-load 'ox-html
+  (setq org-html-head
+        (replace-regexp-in-string
+         ".org-svg { width: 90%; }"
+         ".org-svg { width: auto; }"
+         org-html-style-default)))
+
+;;(add-to-list 'org-latex-packages-alist '("" "tikz" t))
+;;(add-to-list 'org-latex-packages-alist '("" "pgfplots" t))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;; startup
+(add-hook 'window-setup-hook
+          (lambda ()
+            (neotree-toggle)
+            (neotree-dir "~/../../org/")
+            (neotree-refresh)
+            (other-window 1)))
