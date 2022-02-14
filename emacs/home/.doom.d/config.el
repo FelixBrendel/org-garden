@@ -17,7 +17,7 @@
 ;;  - [X] make C-c f p work
 ;;  - [X] startup opening neotree correctly
 ;;  - [X] intall biblio
-;;  - [ ] org roam capture templates
+;;  - [X] org roam capture templates
 ;;  - [ ] org roam -> .bib file
 ;;  - [ ] knowledge base export
 
@@ -120,9 +120,38 @@
   (org-roam-directory "~/../../org/vault/")
   (org-roam-db-location "~/../../org/vault/.roam.db")
   (org-roam-capture-templates
-   '(("d" "default" plain "%?" :target
+   '(("d" "General Notes" plain "%?" :target
       (file+head "${slug}.org" "#+title: ${title}\n")
-      :unnarrowed t)))
+      :unnarrowed t)
+     ("u" "Notes for Uni")
+     ("uu" "Uni General" plain "%?" :target
+      (file+head "Uni/${slug}.org" "#+title: ${title}\n#+filetags: :chem:\n")
+      :unnarrowed t)
+
+     ("um" "Uni Math")
+     ("umm" "Uni Math General" plain "%?" :target
+      (file+head "Uni/Math/${slug}.org" "#+title: ${title}\n#+filetags: :math:\n")
+      :unnarrowed t)
+     ("umc" "Uni Math Calculus" plain "%?" :target
+      (file+head "Uni/Math/${slug}.org" "#+title: ${title}\n#+filetags: :math:calculus:\n")
+      :unnarrowed t)
+     ("ump" "Uni Math Probability" plain "%?" :target
+      (file+head "Uni/Math/${slug}.org" "#+title: ${title}\n#+filetags: :math:probability:\n")
+      :unnarrowed t)
+     ("uml" "Uni Math Linear Algebra" plain "%?" :target
+      (file+head "Uni/Math/${slug}.org" "#+title: ${title}\n#+filetags: :math:linear-algebra:\n")
+      :unnarrowed t)
+
+     ("uc" "Uni/Chemie" plain "%?" :target
+      (file+head "Uni/Chemie/${slug}.org" "#+title: ${title}\n#+setupfile: setupfile.org\n")
+      :unnarrowed t)
+     ("ug" "Uni/Graphics" plain "%?" :target
+      (file+head "Uni/Graphics/${slug}.org" "#+title: ${title}\n#+filetags: :computer-graphics:\n")
+      :unnarrowed t)
+     ("ud" "Uni/Deep Learning" plain "%?" :target
+      (file+head "Uni/Deep Learning/${slug}.org" "#+title: ${title}\n#+filetags: :deep-learning:\n")
+      :unnarrowed t)
+     ))
 
   :bind (("C-c n l" . org-roam-buffer-toggle)
          ("C-c n f" . org-roam-node-find)
@@ -175,7 +204,6 @@ Performs a database upgrade when required."
         (emacsql db (format "PRAGMA user_version = %s" org-roam-db-version))))
     )
 
-  
   (org-roam-setup))
 
 (use-package! websocket   :after org-roam)
