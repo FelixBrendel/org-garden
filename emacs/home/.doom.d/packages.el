@@ -49,6 +49,8 @@
 ;; ...Or *all* packages (NOT RECOMMENDED; will likely break things)
 ;(unpin! t)
 
+(package! ws-butler :disable t)
+
 (package! company-posframe)
 (package! org-fragtog)
 (package! biblio)

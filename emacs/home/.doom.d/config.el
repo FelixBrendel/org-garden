@@ -18,8 +18,14 @@
 ;;  - [X] startup opening neotree correctly
 ;;  - [X] intall biblio
 ;;  - [X] org roam capture templates
-;;  - [ ] org roam -> .bib file
-;;  - [ ] knowledge base export
+;;  - [X] C-y (yank) can now insert images straigt into org buffers
+;;  - [X] org insert screenshot from clipboard (Windows)
+;;  - [X] knowledge base export -> wiki website
+;;  - [X] ws-butler (?) keeps messing up whitespace on save -> should only delete end of line whitespace (not on current line though)
+
+;;  - [ ] org-fill-paragraph should not remove latex preview
+;;  - [ ] knowledge base export -> .bib file
+;;  - [ ] org insert screenshot from clipboard (Linux)
 
 
 ;; Some functionality uses this to identify you, e.g. GPG configuration, email
@@ -142,14 +148,18 @@
       (file+head "Uni/Math/${slug}.org" "#+title: ${title}\n#+filetags: :math:linear-algebra:\n")
       :unnarrowed t)
 
-     ("uc" "Uni/Chemie" plain "%?" :target
-      (file+head "Uni/Chemie/${slug}.org" "#+title: ${title}\n#+setupfile: setupfile.org\n")
+     ("uc" "Uni/Computer Architecture" plain "%?" :target
+      (file+head "Uni/Computer Architecture/${slug}.org" "#+title: ${title}\n#+filetags: :computer-architecture:\n")
       :unnarrowed t)
      ("ug" "Uni/Graphics" plain "%?" :target
       (file+head "Uni/Graphics/${slug}.org" "#+title: ${title}\n#+filetags: :computer-graphics:\n")
       :unnarrowed t)
      ("ud" "Uni/Deep Learning" plain "%?" :target
       (file+head "Uni/Deep Learning/${slug}.org" "#+title: ${title}\n#+filetags: :deep-learning:\n")
+      :unnarrowed t)
+
+     ("c" "Uni/Chemie" plain "%?" :target
+      (file+head "Uni/Chemie/${slug}.org" "#+title: ${title}\n#+setupfile: setupfile.org\n")
       :unnarrowed t)
      ))
 
@@ -159,7 +169,7 @@
          :map org-mode-map
          ("C-M-i" . completion-at-point))
   :config
-  ;; NOTE(Felix): hopefullly teporary fix 
+  ;; NOTE(Felix): hopefullly teporary fix
   (progn
     (require 'emacsql-sqlite3)
     (defun org-roam-db ()
@@ -268,7 +278,7 @@ Performs a database upgrade when required."
 (map! :map org-mode-map
       "C-r"  'org-roam-node-insert
       "C-j"  'join-line
-      "<f2>" 'org-roam-buffer-toggle)
+      "C-y"  'my-org-yank)
 
 (setq +doom-dashboard-menu-sections
       '(("Find node in vault"
@@ -323,6 +333,69 @@ Performs a database upgrade when required."
   (if (file-exists-p filename)
       (insert (concat "[[file:" filename "]]"))))
 
+(defun system-clipboard-contains-image-p ()
+  (interactive)
+  (cond
+   ((eq system-type 'windows-nt)  (let ((clip (w32-selection-targets 'CLIPBOARD)))
+                                    (if (and (eq 'DataObject (aref clip 0))
+                                             (eq 'BITMAP (aref clip 2)))
+                                        t
+                                      )))
+   (eq system-type 'gnu/linux)    (error "TODO: implement this for linux")
+   ))
+
+(defun org-paste-screenshot-from-clipboard ()
+  (interactive)
+
+  ;; should only work in org
+  (unless (derived-mode-p 'org-mode)
+    (error "Not in org mode buffer"))
+
+  ;; make some file name
+  (setq filename
+        (concat "images/"
+                (file-name-nondirectory (buffer-file-name))
+                " -- "
+                (format-time-string "%d-%m-%Y_%H-%M-%S")
+                ".png"))
+
+  ;; make sure the directory structure exists
+  (unless (file-exists-p (file-name-directory filename))
+    (make-directory (file-name-directory filename)))
+
+  ;; write the image file to disk
+  (when (eq system-type 'windows-nt)
+    (shell-command (concat "powershell -command "
+                           "\"Add-Type -AssemblyName System.Windows.Forms;"
+                           "if ($([System.Windows.Forms.Clipboard]::ContainsImage())) {"
+                           "    $image = [System.Windows.Forms.Clipboard]::GetImage();"
+                           "    [System.Drawing.Bitmap]$image.Save('" filename "',[System.Drawing.Imaging.ImageFormat]::Png);"
+                           "    Write-Output 'clipboard content saved as file'"
+                           "} else {"
+                           "    Write-Output 'clipboard does not contain image data'"
+                           "}\"")))
+
+  (when (eq system-type 'gnu/linux)
+    (error "TODO: implement this for linux"))
+
+  ;; insert link into the buffer
+  (when (file-exists-p filename)
+    (insert (concat
+             "\n"
+             "#+attr_org: :width 700\n"
+             "[[file:" filename "]]\n"))
+    (org-redisplay-inline-images))
+  )
+
+(defun my-org-yank (&optional arg)
+  "If the clipboard contains an image then write it to disk
+in a 'images' folder and insert a link to it in the org buffer."
+  (interactive "P")
+  (if (region-active-p)
+      (delete-region (region-beginning) (region-end)))
+  (if (system-clipboard-contains-image-p)
+      (org-paste-screenshot-from-clipboard)
+    (call-interactively #'org-yank)))
 
 (add-hook 'org-mode-hook 'valign-mode)
 (add-hook 'org-mode-hook 'org-bullets-mode)
@@ -564,7 +637,8 @@ This function makes sure that dates are aligned for easy reading."
                      :image-converter
                      ("convert -density %D -trim -antialias %f -quality 100 %O"))))
 
-(setq org-preview-latex-default-process 'imagemagick)
+(setq org-preview-latex-default-process 'dvisvgm)
+(setq org-html-with-latex 'dvisvgm)
 
 
 (progn
@@ -587,7 +661,6 @@ This function makes sure that dates are aligned for easy reading."
 
       (unless (string= "setupfile" (file-name-base filename))
         (with-current-buffer (find-file filename)
-          (setq org-hugo-base-dir "~/public_html/")
           (let* ((abs-path-vault     (expand-file-name (plist-get plist :base-directory)))
                  (abs-path-vault-len (length abs-path-vault))
                  (abs-path-org-file  (file-name-directory filename))
@@ -602,12 +675,29 @@ This function makes sure that dates are aligned for easy reading."
             (let ((org-hugo-section added-path))
               (org-hugo-export-wim-to-md :all-subtrees nil nil nil))))))
 
-    (setq org-publish-project-alist
+
+    (defun publish-garden (&optional FORCE)
+      (interactive "P")
+
+      (let ((old-org-startup-with-latex-preview org-startup-with-latex-preview)
+            (old-org-preview-latex-image-directory org-preview-latex-image-directory)
+            (old-org-format-latex-options org-format-latex-options))
+
+        ;; config
+        (setq org-hugo-base-dir "D:\\Code\\garden\\garden2\\")
+        (setq org-format-latex-options
+              '(:foreground default :background default :scale 2 :html-foreground "White" :html-background "Transparent" :html-scale 1.0 :matchers
+                            ("begin" "$1" "$" "$$" "\\(" "\\[")))
+        (setq org-preview-latex-image-directory (concat (temporary-file-directory) "/ox-hugo-latex/"))
+        (if (file-directory-p org-preview-latex-image-directory)
+            (delete-directory org-preview-latex-image-directory t))
+
+        (setq org-publish-project-alist
           `(
             ("garden-org"
              :base-directory ,org-roam-directory
              :base-extension "org"
-             :publishing-directory "~/public_html/"
+             :publishing-directory ,org-hugo-base-dir
              :recursive t
              :publishing-function org-hugo-publish
              :headline-levels 4             ; Just the default for this project.
@@ -616,7 +706,7 @@ This function makes sure that dates are aligned for easy reading."
             ("garden-static"
              :base-directory ,org-roam-directory
              :base-extension "png\\|jpg\\|svg"
-             :publishing-directory "~/public_html/"
+             :publishing-directory ,org-hugo-base-dir
              :recursive t
              :publishing-function org-publish-attachment
              )
@@ -625,13 +715,22 @@ This function makes sure that dates are aligned for easy reading."
                                    ))
             ))
 
-    (defun publish-garden ()
-      (interactive)
-      (setq org-startup-with-latex-preview nil)
-      (org-roam-update-org-id-locations)
-      (org-publish-project "garden")
-      (setq org-startup-with-latex-preview t)
-      (message "Publish Done!"))
+
+        ;; do
+        (setq org-startup-with-latex-preview nil)
+        (org-roam-update-org-id-locations)
+        (org-publish-project "garden" FORCE)
+
+
+        ;; restore
+        (delete-directory org-preview-latex-image-directory t)
+        (setq org-preview-latex-image-directory old-org-preview-latex-image-directory)
+        (setq org-startup-with-latex-preview old-org-startup-with-latex-preview)
+        (setq org-format-latex-options old-org-format-latex-options)
+        (message "Publish Done!"))
+        )
+
+
     ))
 
 
@@ -695,8 +794,25 @@ This function makes sure that dates are aligned for easy reading."
          ".org-svg { width: auto; }"
          org-html-style-default)))
 
-;;(add-to-list 'org-latex-packages-alist '("" "tikz" t))
-;;(add-to-list 'org-latex-packages-alist '("" "pgfplots" t))
+(add-to-list 'org-latex-packages-alist '("" "tikz" t) t)
+(add-to-list 'org-latex-packages-alist '("" "pgfplots" t) t)
+
+
+(defun delete-trailing-whitespace-except-current-line ()
+  (interactive)
+  (let ((begin (line-beginning-position))
+        (end (line-end-position)))
+    (save-excursion
+      (when (< (point-min) begin)
+        (save-restriction
+          (narrow-to-region (point-min) (1- begin))
+          (delete-trailing-whitespace)))
+      (when (> (point-max) end)
+        (save-restriction
+          (narrow-to-region (1+ end) (point-max))
+          (delete-trailing-whitespace))))))
+(add-hook 'before-save-hook 'delete-trailing-whitespace-except-current-line)
+
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
