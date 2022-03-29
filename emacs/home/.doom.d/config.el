@@ -22,7 +22,11 @@
 ;;  - [X] org insert screenshot from clipboard (Windows)
 ;;  - [X] knowledge base export -> wiki website
 ;;  - [X] ws-butler (?) keeps messing up whitespace on save -> should only delete end of line whitespace (not on current line though)
+;;  - [X] indent pasted images the same as the cursor
+;;  - [X] never export :toc: sections? -> like noexport
+;;  - [X] Autocomplete popup temporarily destroys inline images under the popup
 
+;;  - [ ] C-j does not work in org
 ;;  - [ ] org-fill-paragraph should not remove latex preview
 ;;  - [ ] knowledge base export -> .bib file
 ;;  - [ ] org insert screenshot from clipboard (Linux)
@@ -44,15 +48,16 @@
 ;; They all accept either a font-spec, font string ("Input Mono-12"), or xlfd
 ;; font string. You generally only need these two:
 ;; (setq doom-font (font-spec :family "monospace" :size 12 :weight 'semi-light)
-;;       doom-variable-pitch-font (font-spec :family "sans" :size 13))
 
+;;       doom-variable-pitch-font (font-spec :family "sans" :size 13))
 (setq doom-font (font-spec :family "noto sans mono" :slant 'normal :weight 'normal :height 127 :width 'normal)
       doom-modeline-major-mode-icon t)
 
 ;; There are two ways to load a theme. Both assume the theme is installed and
 ;; available. You can either set `doom-theme' or manually load a theme with the
 ;; `load-theme' function. This is the default:
-(setq doom-theme 'doom-miramare)
+;; (setq doom-theme 'doom-nord)
+(setq doom-theme 'doom-nova)
 
 (use-package! neotree
   :custom
@@ -97,7 +102,6 @@
 ;; they are implemented.
 
 (use-package! company-posframe
-  :defer t
   :config
   (company-posframe-mode 1))
 
@@ -107,9 +111,8 @@
 
 (use-package org-fragtog
   :custom (org-fragtog-preview-delay 99999999999999999)
-  :bind   (:map org-mode-map ("<f2>" . org-toggle-latex-fragment))
+  :bind   (:map org-mode-map ("<f2>" . my-org-f2))
   :hook   (org-mode . org-fragtog-mode))
-
 
 
 (use-package! org-roam
@@ -129,11 +132,18 @@
    '(("d" "General Notes" plain "%?" :target
       (file+head "${slug}.org" "#+title: ${title}\n")
       :unnarrowed t)
+     ("a" "Notes for APIs")
+     ("aw" "Win32 API" plain "%?" :target
+      (file+head "APIs/win32/${slug}.org" "#+title: [win32] ${title}\n#+filetags: :win32:\n")
+      :unnarrowed t)
+     ("av" "Vulkan API" plain "%?" :target
+      (file+head "APIs/vulkan/${slug}.org" "#+title: [vk] ${title}\n#+filetags: :vulkan:\n")
+      :unnarrowed t)
+
      ("u" "Notes for Uni")
      ("uu" "Uni General" plain "%?" :target
       (file+head "Uni/${slug}.org" "#+title: ${title}\n#+filetags: :chem:\n")
       :unnarrowed t)
-
      ("um" "Uni Math")
      ("umm" "Uni Math General" plain "%?" :target
       (file+head "Uni/Math/${slug}.org" "#+title: ${title}\n#+filetags: :math:\n")
@@ -217,15 +227,17 @@ Performs a database upgrade when required."
   (org-roam-setup))
 
 (use-package! websocket   :after org-roam)
-(use-package! org-roam-ui :after org-roam
-    :config (setq org-roam-ui-sync-theme t
-          org-roam-ui-follow t
-          org-roam-ui-update-on-save t
-          org-roam-ui-open-on-start t))
+;; (use-package! org-roam-ui :after org-roam
+;;     :config (setq org-roam-ui-sync-theme t
+;;           org-roam-ui-follow t
+;;           org-roam-ui-update-on-save t
+;;           org-roam-ui-open-on-start t))
 
 (remove-hook 'doom-first-buffer-hook #'smartparens-global-mode)
 (add-hook 'org-mode-hook 'org-fragtog-mode)
 
+(use-package rainbow-delimiters
+  :hook (prog-mode . rainbow-delimiters-mode))
 
 (defun duplicate-line()
   (interactive)
@@ -275,10 +287,6 @@ Performs a database upgrade when required."
 (map! :map global-map
       "C-c f p" 'doom/open-private-config)
 
-(map! :map org-mode-map
-      "C-r"  'org-roam-node-insert
-      "C-j"  'join-line
-      "C-y"  'my-org-yank)
 
 (setq +doom-dashboard-menu-sections
       '(("Find node in vault"
@@ -341,8 +349,7 @@ Performs a database upgrade when required."
                                              (eq 'BITMAP (aref clip 2)))
                                         t
                                       )))
-   (eq system-type 'gnu/linux)    (error "TODO: implement this for linux")
-   ))
+   (eq system-type 'gnu/linux)    (error "TODO: implement this for linux")))
 
 (defun org-paste-screenshot-from-clipboard ()
   (interactive)
@@ -380,12 +387,17 @@ Performs a database upgrade when required."
 
   ;; insert link into the buffer
   (when (file-exists-p filename)
-    (insert (concat
-             "\n"
-             "#+attr_org: :width 700\n"
-             "[[file:" filename "]]\n"))
-    (org-redisplay-inline-images))
+    (let ((col (current-column)))
+      (insert (concat
+               "#+attr_org: :width 500\n"
+               (string-pad "" col)
+               "[[file:" filename "]]\n"))
+      (org-redisplay-inline-images)))
   )
+
+(defun my-org-f2 ()
+  (interactive)
+  (org-toggle-latex-fragment))
 
 (defun my-org-yank (&optional arg)
   "If the clipboard contains an image then write it to disk
@@ -414,17 +426,26 @@ in a 'images' folder and insert a link to it in the org buffer."
       org-startup-with-inline-images t
       org-fontify-whole-heading-line t
       org-fontify-quote-and-verse-blocks t
-      org-hide-emphasis-markers t
-      org-highlight-latex-and-related '(latex))
+      org-hide-emphasis-markers nil
+      org-highlight-latex-and-related '(latex)
+      org-latex-caption-above '(table src-block)
+      org-latex-listings t
+      org-latex-listings-options '(("captionpos" "t")))
 
 (with-eval-after-load 'org
-  (setq org-roam-completion-everywhere t)
-  (setq org-roam-node-display-template "${title:*}${tags}")
-
+  (require 'org-tempo)
+  (setq org-roam-node-display-template
+        (concat "${title:*} "
+                (propertize "${tags}" 'face 'org-tag)))
 
   ;;(add-to-list 'org-latex-packages-alist '("" "tikz" t))
   ;;(add-to-list 'org-latex-packages-alist '("" "pgfplots" t))
   )
+
+(map! :map org-mode-map
+      "C-r"  'org-roam-node-insert
+      "C-j"  'join-line
+      "C-y"  'my-org-yank)
 
 ;; NOTE(Felix): we gotta set org-format-latex-options here after requiring org,
 ;;   otherwise if we use with-eval-after-load, it would only get loaded after we
@@ -660,7 +681,8 @@ This function makes sure that dates are aligned for easy reading."
       ;; "d:/Programme/org-roam/emacs/home/public_html/Uni/Deep Learning/"
 
       (unless (string= "setupfile" (file-name-base filename))
-        (with-current-buffer (find-file filename)
+        (with-current-buffer (find-file-noselect filename)
+          (save-buffer)
           (let* ((abs-path-vault     (expand-file-name (plist-get plist :base-directory)))
                  (abs-path-vault-len (length abs-path-vault))
                  (abs-path-org-file  (file-name-directory filename))
@@ -679,58 +701,58 @@ This function makes sure that dates are aligned for easy reading."
     (defun publish-garden (&optional FORCE)
       (interactive "P")
 
-      (let ((old-org-startup-with-latex-preview org-startup-with-latex-preview)
-            (old-org-preview-latex-image-directory org-preview-latex-image-directory)
-            (old-org-format-latex-options org-format-latex-options))
+      (save-excursion
+        (let ((old-org-startup-with-latex-preview org-startup-with-latex-preview)
+              (old-org-preview-latex-image-directory org-preview-latex-image-directory)
+              (old-org-format-latex-options org-format-latex-options))
 
-        ;; config
-        (setq org-hugo-base-dir "D:\\Code\\garden\\garden2\\")
-        (setq org-format-latex-options
-              '(:foreground default :background default :scale 2 :html-foreground "White" :html-background "Transparent" :html-scale 1.0 :matchers
-                            ("begin" "$1" "$" "$$" "\\(" "\\[")))
-        (setq org-preview-latex-image-directory (concat (temporary-file-directory) "/ox-hugo-latex/"))
-        (if (file-directory-p org-preview-latex-image-directory)
-            (delete-directory org-preview-latex-image-directory t))
+          ;; config
+          (setq org-element-use-cache nil)
+          (setq org-hugo-base-dir "D:\\Code\\test\\knowledge-base\\")
+          (setq org-format-latex-options
+                '(:foreground default :background default :scale 2 :html-foreground "White" :html-background "Transparent" :html-scale 1.0 :matchers
+                              ("begin" "$1" "$" "$$" "\\(" "\\[")))
+          (setq org-preview-latex-image-directory (concat (temporary-file-directory) "/ox-hugo-latex/"))
 
-        (setq org-publish-project-alist
-          `(
-            ("garden-org"
-             :base-directory ,org-roam-directory
-             :base-extension "org"
-             :publishing-directory ,org-hugo-base-dir
-             :recursive t
-             :publishing-function org-hugo-publish
-             :headline-levels 4             ; Just the default for this project.
-             :auto-preamble t
-             )
-            ("garden-static"
-             :base-directory ,org-roam-directory
-             :base-extension "png\\|jpg\\|svg"
-             :publishing-directory ,org-hugo-base-dir
-             :recursive t
-             :publishing-function org-publish-attachment
-             )
-            ("garden" :components ("garden-org"
-                                   ;;"garden-static"
-                                   ))
-            ))
+          (if (file-directory-p org-preview-latex-image-directory)
+              (delete-directory org-preview-latex-image-directory t))
 
-
-        ;; do
-        (setq org-startup-with-latex-preview nil)
-        (org-roam-update-org-id-locations)
-        (org-publish-project "garden" FORCE)
+          (setq org-publish-project-alist
+                `(("garden-org"
+                   :base-directory ,org-roam-directory
+                   :base-extension "org"
+                   :publishing-directory ,org-hugo-base-dir
+                   :recursive t
+                   :publishing-function org-hugo-publish
+                   :headline-levels 4             ; Just the default for this project.
+                   :auto-preamble t
+                   )
+                  ("garden-static"
+                   :base-directory ,org-roam-directory
+                   :base-extension "png\\|jpg\\|svg"
+                   :publishing-directory ,org-hugo-base-dir
+                   :recursive t
+                   :publishing-function org-publish-attachment
+                   )
+                  ("garden" :components ("garden-org"
+                                         ;;"garden-static"
+                                         ))
+                  ))
 
 
-        ;; restore
-        (delete-directory org-preview-latex-image-directory t)
-        (setq org-preview-latex-image-directory old-org-preview-latex-image-directory)
-        (setq org-startup-with-latex-preview old-org-startup-with-latex-preview)
-        (setq org-format-latex-options old-org-format-latex-options)
-        (message "Publish Done!"))
-        )
+          ;; do
+          (setq org-startup-with-latex-preview nil)
+          (org-roam-update-org-id-locations)
+          (org-publish-project "garden" FORCE)
 
 
+          ;; restore
+          (delete-directory org-preview-latex-image-directory t)
+          (setq org-preview-latex-image-directory old-org-preview-latex-image-directory)
+          (setq org-startup-with-latex-preview old-org-startup-with-latex-preview)
+          (setq org-format-latex-options old-org-format-latex-options)
+          (message "Publish Done!"))
+        ))
     ))
 
 
@@ -794,6 +816,7 @@ This function makes sure that dates are aligned for easy reading."
          ".org-svg { width: auto; }"
          org-html-style-default)))
 
+(add-to-list 'org-export-exclude-tags "toc")
 (add-to-list 'org-latex-packages-alist '("" "tikz" t) t)
 (add-to-list 'org-latex-packages-alist '("" "pgfplots" t) t)
 

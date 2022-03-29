@@ -56,10 +56,11 @@
 (package! biblio)
 (package! ox-hugo)
 
+(package! kuronami-theme :recipe (:host github :repo "super3ggo/kuronami"      :files ("kuronami-theme.el")))
+
 (package! emacsql-sqlite3)
 (unpin! org-roam)
 (package! websocket)
-(package! org-roam-ui :recipe (:host github :repo "org-roam/org-roam-ui" :files ("*.el" "out")))
 
 (package! valign)
 (package! org-bullets)
