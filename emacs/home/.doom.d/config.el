@@ -124,8 +124,8 @@
                  (window-parameters . ((no-delete-other-windows . t)))))
   (setq org-roam-v2-ack t)
   :custom
-  (org-roam-directory "~/../../org/vault/")
-  (org-roam-db-location "~/../../org/vault/.roam.db")
+  (org-roam-directory (concat org-directory "vault/"))
+  (org-roam-db-location (concat org-directory "vault/.roam.db"))
   (org-roam-capture-templates
    '(("d" "General Notes" plain "%?" :target
       (file+head "Default/${slug}.org" "#+title: ${title}\n")
@@ -386,6 +386,8 @@ Performs a database upgrade when required."
       "C-r"         'org-roam-node-insert
       "C-o"         'org-roam-node-find
       "M-SPC"       'change-lang
+      "M-d"         'lookup-docs-for-symbol-at-point
+      :leader "e" 'save-and-find-build-script-and-compile
       )
 
 ;; NOTE(Felix): make C-c f p not throw errors by rebinding it
@@ -588,7 +590,6 @@ Performs a database upgrade when required."
   (setq c-default-style "FELIX")
 
   (defun my-c-mode-hook ()
-    (yas-minor-mode t)
     (lsp)
     (bind-key* "C-d" #'mark-word-or-next-word-like-this)
     (c-set-offset 'substatement-open 0)
@@ -600,7 +601,7 @@ Performs a database upgrade when required."
   (add-hook 'c-mode-hook    'my-c-mode-hook)
   (add-hook 'c++-mode-hook  'my-c-mode-hook)
   (add-hook 'prog-mode-hook 'rainbow-delimiters-mode)
-  (add-hook 'c++-mode-hook #'modern-c++-font-lock-mode)
+  ;; (add-hook 'c++-mode-hook #'modern-c++-font-lock-mode)
   (add-hook 'org-mode-hook #'hl-todo-mode)
 
   (font-lock-add-keywords
@@ -995,9 +996,10 @@ This function makes sure that dates are aligned for easy reading."
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; startup
-;; (add-hook 'window-setup-hook
-;;           (lambda ()
-;;             (neotree-toggle)
-;;             (neotree-dir "~/../../org/")
-;;             (neotree-refresh)
-;;             (other-window 1)))
+(add-hook 'window-setup-hook
+          (lambda ()
+            (neotree-toggle)
+            (neotree-dir org-directory)
+            (neotree-refresh)
+            (toggle-frame-maximized)
+            (other-window 1)))
