@@ -50,7 +50,7 @@
 ;; (setq doom-font (font-spec :family "monospace" :size 12 :weight 'semi-light)
 
 ;;       doom-variable-pitch-font (font-spec :family "sans" :size 13))
-(setq doom-font (font-spec :family "noto sans mono" :slant 'normal :weight 'normal :height 127 :width 'normal)
+(setq doom-font (font-spec :name "noto sans mono" :size 12.0)
       doom-modeline-major-mode-icon t)
 
 ;; There are two ways to load a theme. Both assume the theme is installed and
@@ -104,16 +104,12 @@
 (use-package! company-posframe
   :config
   (company-posframe-mode 1))
-
 (use-package! valign)
-
 (use-package! biblio)
-
 (use-package org-fragtog
   :custom (org-fragtog-preview-delay 99999999999999999)
   :bind   (:map org-mode-map ("<f2>" . my-org-f2))
   :hook   (org-mode . org-fragtog-mode))
-
 
 (use-package! org-roam
   :init
@@ -130,7 +126,7 @@
   (org-roam-db-location "~/../../org/vault/.roam.db")
   (org-roam-capture-templates
    '(("d" "General Notes" plain "%?" :target
-      (file+head "${slug}.org" "#+title: ${title}\n")
+      (file+head "Default/${slug}.org" "#+title: ${title}\n")
       :unnarrowed t)
      ("k" "Korean" plain "%?" :target
       (file+head "Korean/${slug}.org" "#+title: ${title}\n\n")
@@ -229,7 +225,7 @@ Performs a database upgrade when required."
 
   (org-roam-setup))
 
-(use-package! websocket   :after org-roam)
+(use-package! websocket :after org-roam)
 ;; (use-package! org-roam-ui :after org-roam
 ;;     :config (setq org-roam-ui-sync-theme t
 ;;           org-roam-ui-follow t
@@ -237,7 +233,6 @@ Performs a database upgrade when required."
 ;;           org-roam-ui-open-on-start t))
 
 (remove-hook 'doom-first-buffer-hook #'smartparens-global-mode)
-(add-hook 'org-mode-hook 'org-fragtog-mode)
 
 (use-package rainbow-delimiters
   :hook (prog-mode . rainbow-delimiters-mode))
@@ -256,6 +251,10 @@ Performs a database upgrade when required."
     (pop kill-ring))
   (call-interactively 'next-line)))
 
+(defun lookup-docs-for-symbol-at-point ()
+  (interactive)
+    (+lookup/online (thing-at-point 'symbol) "DevDocs.io"))
+
 (defun mark-word-or-next-word-like-this ()
   "if there is no active region the word under
    the point will be marked, otherwise the next word is selected."
@@ -268,6 +267,110 @@ Performs a database upgrade when required."
         (mc/maybe-multiple-cursors-mode))
     ;; else
     (mc--mark-symbol-at-point)))
+
+(defmacro code-region (name &rest body)
+  ;; NOTE(Felix): after first arg there is body and should be indented as body
+  (declare (indent 1))
+  (cons 'progn body))
+
+(code-region "Compiling"
+  (setq is-windows (string= system-type "windows-nt"))
+  (setq build-script-names (list
+                            (if is-windows '("build.ps1" . "powershell.exe -ExecutionPolicy Unrestricted -File build.ps1"))
+                            (if is-windows "build.bat" "build.sh")
+                            (if is-windows "build-windows.bat" "build-linux.sh")
+                            (if is-windows "bob.exe"   "bob")
+                            '("CMakeLists.txt" . "cmake -S . -B __build__ && cmake --build __build__")
+                            '("Makefile"       . "make")))
+
+  (with-eval-after-load 'compile
+    (add-to-list 'compilation-error-regexp-alist 'msbuild-error)
+    (add-to-list 'compilation-error-regexp-alist-alist
+                 '(msbuild-error
+                   "^\\(.*?\\)(\\([0-9]+\\),\\([0-9]+\\)): \\(?:\\(fatal \\)?error\\|\\(warning\\)\\|\\(message\\)\\) .*?:" 1 2 3 (4))))
+
+
+
+  (defun first-non-nil (l)
+    (unless (null l)
+      (if (car l)
+          (car l)
+        (first-non-nil (cdr l)))))
+
+  (defun filter-non-nil (l)
+    (unless (null l)
+      (if (car l)
+          (cons (car l) (filter-non-nil (cdr l)))
+        (filter-non-nil (cdr l)))))
+
+  (cl-defun longest-car-string (l &optional (max-so-far (cons nil nil)) (max-so-far-len 0))
+    (if l (let* ((element (caar l))
+                 (others  (cdr l))
+                 (strlen  (length element)))
+            (if (> strlen max-so-far-len)
+                (longest-car-string others (car l) strlen)
+              (longest-car-string others max-so-far max-so-far-len)))
+      max-so-far))
+
+  (defun find-closest-build-script ()
+    (let* ((potential-paths (mapcar (lambda (build-script-name)
+                                      (let* ((name (if (consp build-script-name) (car build-script-name) build-script-name))
+                                             (path (locate-dominating-file (expand-file-name default-directory) name)))
+                                        (when path
+                                          (cons path name))))
+                                    build-script-names))
+           (existing-paths (filter-non-nil potential-paths)))
+
+      (if existing-paths
+          (longest-car-string existing-paths)
+        (cons nil nil))
+      ))
+
+  (cl-defun translate-build-file-to-command (file &optional (build-scrips build-script-names))
+    (unless build-scrips
+      (error "unkown build script"))
+    (let* ((first          (car build-scrips))
+           (iter-file-name (if (consp first) (car first) first)))
+      (if (string= file iter-file-name)
+          (if (consp first) (cdr first) first)
+        (translate-build-file-to-command file (cdr build-scrips)))))
+
+  (defun save-and-find-build-script-and-compile ()
+    (interactive)
+    (let* ((path-and-script (find-closest-build-script))
+           (path   (car path-and-script))
+           (script (cdr path-and-script)))
+
+      (unless path
+        (error "no build files found"))
+
+      (let ((command (translate-build-file-to-command script))
+            (curr-dir default-directory))
+
+        (setq compilation-finish-functions
+              (list (lambda (&rest _)
+                      (compilation-minor-mode 1))))
+        (cd path)
+        (compilation-start command t)
+        (cd curr-dir))))
+
+
+  (push '("^Comint \\(finished\\).*"
+          (0 '(face nil compilation-message nil help-echo nil mouse-face nil) t)
+          (1 compilation-info-face))
+        compilation-mode-font-lock-keywords)
+
+  (push '("^Comint \\(exited abnormally\\|interrupt\\|killed\\|terminated\\|segmentation fault\\)\\(?:.*with code \\([0-9]+\\)\\)?.*"
+          (0 '(face nil compilation-message nil help-echo nil mouse-face nil) t)
+          (1 compilation-error-face)
+          (2 compilation-error-face nil t))
+        compilation-mode-font-lock-keywords)
+
+  )
+
+
+(map! :map LaTeX-mode-map
+      "C-c C-e" (lambda () (interactive) (TeX-command "LaTeX" 'TeX-master-file)))
 
 (map! :map vertico-map
       "C-o" 'embark-export)
@@ -310,24 +413,25 @@ Performs a database upgrade when required."
          :when (file-directory-p doom-private-dir)
          :action doom/open-private-config)))
 
-(defun org-take-and-insert-screenshot ()
-  "Take a screenshot into a time stamped unique-named file in ab `images'
+(code-region "Org Screenshots"
+  (defun org-take-and-insert-screenshot ()
+    "Take a screenshot into a time stamped unique-named file in ab `images'
    directory, next to the org-buffer and insert a link to this file."
-  (interactive)
-  (unless (derived-mode-p 'org-mode)
-    (error "Not in org mode buffer"))
-  (setq filename
-        (concat "images/"
-                (file-name-nondirectory (buffer-file-name))
-                " -- "
-                (format-time-string "%d-%m-%Y_%H-%M-%S")
-                ".png"))
+    (interactive)
+    (unless (derived-mode-p 'org-mode)
+      (error "Not in org mode buffer"))
+    (setq filename
+          (concat "images/"
+                  (file-name-nondirectory (buffer-file-name))
+                  " -- "
+                  (format-time-string "%d-%m-%Y_%H-%M-%S")
+                  ".png"))
 
-  (unless (file-exists-p (file-name-directory filename))
-    (make-directory (file-name-directory filename)))
+    (unless (file-exists-p (file-name-directory filename))
+      (make-directory (file-name-directory filename)))
 
-  ; take screenshot
-  (when (eq system-type 'windows-nt)
+                                        ; take screenshot
+    (when (eq system-type 'windows-nt)
       (shell-command "snippingtool /clip")
       (shell-command (concat "powershell -command "
                              "\"Add-Type -AssemblyName System.Windows.Forms;"
@@ -338,336 +442,428 @@ Performs a database upgrade when required."
                              "} else {"
                              "    Write-Output 'clipboard does not contain image data'"
                              "}\"")))
-  (when (eq system-type 'gnu/linux)
-    (call-process "import" nil nil nil filename))
+    (when (eq system-type 'gnu/linux)
+      (call-process "import" nil nil nil filename))
 
-  ; insert into file if correctly taken
-  (if (file-exists-p filename)
-      (insert (concat "[[file:" filename "]]"))))
+                                        ; insert into file if correctly taken
+    (if (file-exists-p filename)
+        (insert (concat "[[file:" filename "]]"))))
 
-(defun system-clipboard-contains-image-p ()
-  (interactive)
-  (cond
-   ((eq system-type 'windows-nt)  (let ((clip (w32-selection-targets 'CLIPBOARD)))
-                                    (if (and (eq 'DataObject (aref clip 0))
-                                             (eq 'BITMAP (aref clip 2)))
-                                        t
-                                      )))
-   (eq system-type 'gnu/linux)    (error "TODO: implement this for linux")))
+  (defun system-clipboard-contains-image-p ()
+    (interactive)
+    (cond
+      ((eq system-type 'windows-nt)  (let ((clip (w32-selection-targets 'CLIPBOARD)))
+                                       (if (and (eq 'DataObject (aref clip 0))
+                                                (eq 'BITMAP (aref clip 2)))
+                                           t
+                                         )))
+      (eq system-type 'gnu/linux)    (error "TODO: implement this for linux")))
 
-(defun org-paste-screenshot-from-clipboard ()
-  (interactive)
+  (defun org-paste-screenshot-from-clipboard ()
+    (interactive)
 
-  ;; should only work in org
-  (unless (derived-mode-p 'org-mode)
-    (error "Not in org mode buffer"))
+    ;; should only work in org
+    (unless (derived-mode-p 'org-mode)
+      (error "Not in org mode buffer"))
 
-  ;; make some file name
-  (setq filename
-        (concat "images/"
-                (file-name-nondirectory (buffer-file-name))
-                " -- "
-                (format-time-string "%d-%m-%Y_%H-%M-%S")
-                ".png"))
+    ;; make some file name
+    (setq filename
+          (concat "images/"
+                  (file-name-nondirectory (buffer-file-name))
+                  " -- "
+                  (format-time-string "%d-%m-%Y_%H-%M-%S")
+                  ".png"))
 
-  ;; make sure the directory structure exists
-  (unless (file-exists-p (file-name-directory filename))
-    (make-directory (file-name-directory filename)))
+    ;; make sure the directory structure exists
+    (unless (file-exists-p (file-name-directory filename))
+      (make-directory (file-name-directory filename)))
 
-  ;; write the image file to disk
-  (when (eq system-type 'windows-nt)
-    (shell-command (concat "powershell -command "
-                           "\"Add-Type -AssemblyName System.Windows.Forms;"
-                           "if ($([System.Windows.Forms.Clipboard]::ContainsImage())) {"
-                           "    $image = [System.Windows.Forms.Clipboard]::GetImage();"
-                           "    [System.Drawing.Bitmap]$image.Save('" filename "',[System.Drawing.Imaging.ImageFormat]::Png);"
-                           "    Write-Output 'clipboard content saved as file'"
-                           "} else {"
-                           "    Write-Output 'clipboard does not contain image data'"
-                           "}\"")))
+    ;; write the image file to disk
+    (when (eq system-type 'windows-nt)
+      (shell-command (concat "powershell -command "
+                             "\"Add-Type -AssemblyName System.Windows.Forms;"
+                             "if ($([System.Windows.Forms.Clipboard]::ContainsImage())) {"
+                             "    $image = [System.Windows.Forms.Clipboard]::GetImage();"
+                             "    [System.Drawing.Bitmap]$image.Save('" filename "',[System.Drawing.Imaging.ImageFormat]::Png);"
+                             "    Write-Output 'clipboard content saved as file'"
+                             "} else {"
+                             "    Write-Output 'clipboard does not contain image data'"
+                             "}\"")))
 
-  (when (eq system-type 'gnu/linux)
-    (error "TODO: implement this for linux"))
+    (when (eq system-type 'gnu/linux)
+      (error "TODO: implement this for linux"))
 
-  ;; insert link into the buffer
-  (when (file-exists-p filename)
-    (let ((col (current-column)))
-      (insert (concat
-               "#+attr_org: :width 500\n"
-               (string-pad "" col)
-               "[[file:" filename "]]\n"))
-      (org-redisplay-inline-images)))
+    ;; insert link into the buffer
+    (when (file-exists-p filename)
+      (let ((col (current-column)))
+        (insert (concat
+                 "#+attr_org: :width 500\n"
+                 (string-pad "" col)
+                 "[[file:" filename "]]\n"))
+        (org-redisplay-inline-images)))
+    )
   )
 
-(defun my-org-f2 ()
-  (interactive)
-  (org-toggle-latex-fragment))
 
-(defun my-org-yank (&optional arg)
-  "If the clipboard contains an image then write it to disk
+(code-region "c indentation"
+  (c-add-style "FELIX"
+               '("gnu"
+                 (c-basic-offset . 4)     ; Guessed value
+                 (c-offsets-alist
+                  (arglist-cont . 0)      ; Guessed value
+                  (arglist-intro . +)     ; Guessed value
+                  (block-close . 0)       ; Guessed value
+                  (brace-entry-open . 0)  ; Guessed value
+                  (brace-list-close . 0)  ; Guessed value
+                  (brace-list-entry . 0)  ; Guessed value
+                  (brace-list-intro . +)  ; Guessed value
+                  (defun-block-intro . +) ; Guessed value
+                  (defun-close . 0)       ; Guessed value
+                  (defun-open . 0)        ; Guessed value
+                  (else-clause . 0)       ; Guessed value
+                  (func-decl-cont . +)    ; Guessed value
+                  (inline-close . 0)      ; Guessed value
+                  (innamespace . +)       ; Guessed value
+                  (namespace-close . 0)   ; Guessed value
+                  (statement . 0)         ; Guessed value
+                  (statement-block-intro . +) ; Guessed value
+                  (statement-cont . +)    ; Guessed value
+                  (substatement . +)      ; Guessed value
+                  (substatement-open . 0) ; Guessed value
+                  (topmost-intro . 0)     ; Guessed value
+                  (access-label . -)
+                  (annotation-top-cont . 0)
+                  (annotation-var-cont . +)
+                  (arglist-close . c-lineup-close-paren)
+                  (arglist-cont-nonempty . c-lineup-arglist)
+                  (block-open . 0)
+                  (brace-list-open . +)
+                  (c . c-lineup-C-comments)
+                  (case-label . +)
+                  (catch-clause . 0)
+                  (class-close . 0)
+                  (class-open . 0)
+                  (comment-intro . c-lineup-comment)
+                  (composition-close . 0)
+                  (composition-open . 0)
+                  (cpp-define-intro c-lineup-cpp-define +)
+                  (cpp-macro . -1000)
+                  (cpp-macro-cont . +)
+                  (do-while-closure . 0)
+                  (extern-lang-close . 0)
+                  (extern-lang-open . 0)
+                  (friend . 0)
+                  (inclass . +)
+                  (incomposition . +)
+                  (inexpr-class . +)
+                  (inexpr-statement . +)
+                  (inextern-lang . +)
+                  (inher-cont . c-lineup-multi-inher)
+                  (inher-intro . +)
+                  (inlambda . 0)
+                  (inline-open . 0)
+                  (inmodule . +)
+                  (knr-argdecl . 0)
+                  (knr-argdecl-intro . 5)
+                  (label . 0)
+                  (lambda-intro-cont . +)
+                  (member-init-cont . c-lineup-multi-inher)
+                  (member-init-intro . +)
+                  (module-close . 0)
+                  (module-open . 0)
+                  (namespace-open . 0)
+                  (objc-method-args-cont . c-lineup-ObjC-method-args)
+                  (objc-method-call-cont c-lineup-ObjC-method-call-colons c-lineup-ObjC-method-call +)
+                  (objc-method-intro .
+                   [0])
+                  (statement-case-intro . +)
+                  (statement-case-open . +)
+                  (stream-op . c-lineup-streamop)
+                  (string . -1000)
+                  (substatement-label . 0)
+                  (template-args-cont c-lineup-template-args +)
+                  (topmost-intro-cont first c-lineup-topmost-intro-cont c-lineup-gnu-DEFUN-intro-cont))))
+  (setq c-default-style "FELIX")
+
+  (defun my-c-mode-hook ()
+    (yas-minor-mode t)
+    (lsp)
+    (bind-key* "C-d" #'mark-word-or-next-word-like-this)
+    (c-set-offset 'substatement-open 0)
+    (c-set-offset 'case-label '+)
+    (c-set-offset 'brace-list-intro '+)
+    (c-set-offset 'brace-list-close 0))
+
+  (add-hook 'java-mode-hook 'my-c-mode-hook)
+  (add-hook 'c-mode-hook    'my-c-mode-hook)
+  (add-hook 'c++-mode-hook  'my-c-mode-hook)
+  (add-hook 'prog-mode-hook 'rainbow-delimiters-mode)
+  (add-hook 'c++-mode-hook #'modern-c++-font-lock-mode)
+  (add-hook 'org-mode-hook #'hl-todo-mode)
+
+  (font-lock-add-keywords
+   'c++-mode
+   '(("\\<\\(defer\\|if_debug\\|panic_if\\|panic\\)\\>" . font-lock-keyword-face)))
+  )
+
+(code-region "Org config"
+  (defun my-org-f2 ()
+    (interactive)
+    (org-toggle-latex-fragment))
+
+  (defun my-org-yank (&optional arg)
+    "If the clipboard contains an image then write it to disk
 in a 'images' folder and insert a link to it in the org buffer."
-  (interactive "P")
-  (if (region-active-p)
-      (delete-region (region-beginning) (region-end)))
-  (if (system-clipboard-contains-image-p)
-      (org-paste-screenshot-from-clipboard)
-    (call-interactively #'org-yank)))
+    (interactive "P")
+    (if (region-active-p)
+        (delete-region (region-beginning) (region-end)))
+    (if (system-clipboard-contains-image-p)
+        (org-paste-screenshot-from-clipboard)
+      (call-interactively #'org-yank)))
 
-(add-hook 'org-mode-hook 'valign-mode)
-(add-hook 'org-mode-hook 'org-bullets-mode)
-(add-hook 'org-mode-hook (lambda () (setq fill-column 75)))
+  (add-hook 'org-mode-hook 'valign-mode)
+  (add-hook 'org-mode-hook 'org-bullets-mode)
+  (add-hook 'org-mode-hook 'org-fragtog-mode)
+  (add-hook 'org-mode-hook (lambda () (setq fill-column 75)))
 
-;; NOTE(Felix): This is a fix for org mode hanging indefinetly when saving the
-;;   buffer because doom emacs adds a hook to org-encrypt-entries on save which
-;;   seems to hang indefinitely (org mode bug maybe)
-;;   https://github.com/hlissner/doom-emacs/issues/5924
-(add-hook 'org-mode-hook (lambda () (remove-hook 'before-save-hook 'org-encrypt-entries t)) 100)
+  ;; NOTE(Felix): This is a fix for org mode hanging indefinetly when saving the
+  ;;   buffer because doom emacs adds a hook to org-encrypt-entries on save which
+  ;;   seems to hang indefinitely (org mode bug maybe)
+  ;;   https://github.com/hlissner/doom-emacs/issues/5924
+  (add-hook 'org-mode-hook (lambda () (remove-hook 'before-save-hook 'org-encrypt-entries t)) 100)
+
+  (setq org-export-babel-evaluate nil
+        org-fontify-quote-and-verse-blocks t
+        org-fontify-whole-heading-line t
+        org-hide-emphasis-markers nil
+        org-highlight-latex-and-related '(latex)
+        org-html-with-latex 'dvisvgm
+        org-latex-caption-above '(table src-block)
+        org-latex-listings t
+        org-latex-listings-options '(("captionpos" "t"))
+        org-startup-with-inline-images t
+        org-startup-with-latex-preview t
+        org-startup-indented t
+
+        org-preview-latex-default-process 'dvisvgm
+        org-preview-latex-process-alist
+        '((dvipng :programs
+           ("latex" "dvipng")
+           :description "dvi > png" :message "you need to install the programs: latex and dvipng." :image-input-type "dvi" :image-output-type "png" :image-size-adjust
+           (1.0 . 1.0)
+           :latex-compiler
+           ("latex -interaction nonstopmode -output-directory %o %f")
+           :image-converter
+           ("dvipng -D %D -T tight -o %O %f")
+           :transparent-image-converter
+           ("dvipng -D %D -T tight -bg Transparent -o %O %f"))
+          (dvisvgm :programs
+           ("latex" "dvisvgm")
+           :description "dvi > svg" :message "you need to install the programs: latex and dvisvgm." :image-input-type "dvi" :image-output-type "svg" :image-size-adjust
+           (1.7 . 1.5)
+           :latex-compiler
+           ("latex -interaction nonstopmode -output-directory %o %f")
+           :image-converter
+           ("dvisvgm %f -n -b min -c %S -o %O"))
+          (imagemagick :programs
+           ("latex" "convert")
+           :description "pdf > png" :message "you need to install the programs: latex and imagemagick." :image-input-type "pdf" :image-output-type "png" :image-size-adjust
+           (1.0 . 1.0)
+           :latex-compiler
+           ("pdflatex -interaction nonstopmode -output-directory %o %f")
+           :image-converter
+           ("convert -density %D -trim -antialias %f -quality 100 %O"))))
+
+  (with-eval-after-load 'ox-html
+    (setq org-html-head
+          (replace-regexp-in-string
+           ".org-svg { width: 90%; }"
+           ".org-svg { width: auto; }"
+           org-html-style-default)))
+
+  (with-eval-after-load 'org
+    (require 'org-tempo)
+
+    (setq org-roam-node-display-template
+          (concat "${title:*} "
+                  (propertize "${tags}" 'face 'org-tag)))
+
+    ;;(add-to-list 'org-latex-packages-alist '("" "tikz" t))
+    ;;(add-to-list 'org-latex-packages-alist '("" "pgfplots" t))
+    )
+
+  (map! :map org-mode-map
+        "C-r"  'org-roam-node-insert
+        "C-j"  'join-line
+        "C-y"  'my-org-yank)
+
+  ;; NOTE(Felix): we gotta set org-format-latex-options here after requiring org,
+  ;;   otherwise if we use with-eval-after-load, it would only get loaded after we
+  ;;   open the first org file, which at load time would already try to latex
+  ;;   compile the fragments, before executing the `setq org-format-latex-options'
+  ;;   it seems ...
+  (require 'org)
+
+  (require 'ox-latex)
+  (add-to-list 'org-export-exclude-tags "toc")
+  (add-to-list 'org-latex-packages-alist '("" "tikz" t) t)
+  (add-to-list 'org-latex-packages-alist '("" "pgfplots" t) t)
+
+  (setq org-format-latex-options
+        '(:foreground default :background default :scale 2 :html-foreground "Black" :html-background "Transparent" :html-scale 1.0 :matchers
+          ("begin" "$1" "$" "$$" "\\(" "\\[")))
+  (setq org-preview-latex-image-directory "./images/latex/")
+
+  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+  (code-region "Org Agenda"
+    (with-eval-after-load 'org
+      ;; Allow multiple line Org emphasis markup. Like bold
+      ;; http://emacs.stackexchange.com/a/13828/115
+      (setcar (nthcdr 4 org-emphasis-regexp-components) 20) ;Up to 20 lines, default is just 1
+      ;; Below is needed to apply the modified `org-emphasis-regexp-components'
+      ;; settings from above.
+      (org-set-emph-re 'org-emphasis-regexp-components org-emphasis-regexp-components))
+
+    (defun open-my-calendar ()
+      (interactive)
+      (org-agenda nil "o"))
+
+    (map! "<f2>" 'open-my-calendar)
+
+    (setq! calendar-week-start-day 0
+           calendar-day-name-array ["Sonntag" "Montag" "Dienstag" "Mittwoch"
+                                              "Donnerstag" "Freitag" "Samstag"]
+           calendar-month-name-array ["Januar" "Februar" "März" "April" "Mai"
+                                               "Juni" "Juli" "August" "September"
+                                               "Oktober" "November" "Dezember"])
+
+    (setq solar-n-hemi-seasons
+          '("Frühlingsanfang" "Sommeranfang" "Herbstanfang" "Winteranfang"))
+
+    (setq holiday-general-holidays
+          '((holiday-fixed 1 1 "Neujahr")
+            (holiday-fixed 5 1 "1. Mai")
+            (holiday-fixed 10 3 "Tag der Deutschen Einheit")))
+
+    ;; Feiertage für Bayern, weitere auskommentiert
+    (setq holiday-christian-holidays
+          '((holiday-float 12 0 -4 "1. Advent" 24)
+            (holiday-float 12 0 -3 "2. Advent" 24)
+            (holiday-float 12 0 -2 "3. Advent" 24)
+            (holiday-float 12 0 -1 "4. Advent" 24)
+            (holiday-fixed 12 25 "1. Weihnachtstag")
+            (holiday-fixed 12 26 "2. Weihnachtstag")
+            (holiday-fixed 1 6 "Heilige Drei Könige")
+            (holiday-easter-etc -48 "Rosenmontag")
+            ;; (holiday-easter-etc -3 "Gründonnerstag")
+            (holiday-easter-etc  -2 "Karfreitag")
+            (holiday-easter-etc   0 "Ostersonntag")
+            (holiday-easter-etc  +1 "Ostermontag")
+            (holiday-easter-etc +39 "Christi Himmelfahrt")
+            (holiday-easter-etc +49 "Pfingstsonntag")
+            (holiday-easter-etc +50 "Pfingstmontag")
+            (holiday-easter-etc +60 "Fronleichnam")
+            (holiday-fixed 8 15 "Mariae Himmelfahrt")
+            (holiday-fixed 11 1 "Allerheiligen")
+            ;; (holiday-float 11 3 1 "Buss- und Bettag" 16)
+            (holiday-float 11 0 1 "Totensonntag" 20)))
 
 
 
-(setq org-startup-indented t
-      org-startup-with-latex-preview t
-      org-startup-with-inline-images t
-      org-fontify-whole-heading-line t
-      org-fontify-quote-and-verse-blocks t
-      org-hide-emphasis-markers nil
-      org-highlight-latex-and-related '(latex)
-      org-latex-caption-above '(table src-block)
-      org-latex-listings t
-      org-latex-listings-options '(("captionpos" "t")))
+    (setq org-tags-column -90)
+    (setq org-log-done t)
+    (setq org-agenda-category-icon-alist
+          `(("teaching" ,(list "\xf130")       nil nil :ascent center)
+            ("pizza"    ,(list (all-the-icons-material "local_pizza"))           nil nil)
+            ("coffee"   ,(list (all-the-icons-faicon "coffee"))           nil nil)
+            ("events"   ,(list (all-the-icons-faicon "calendar-check-o")) nil nil)
+            ("todo"     ,(list (all-the-icons-faicon "check"))            nil nil)
+            ("pprog"    ,(list (all-the-icons-faicon "align-left"))       nil nil)
+            ("dbsys"    ,(list (all-the-icons-faicon "table"))            nil nil)
+            ("gemji"    ,(list (all-the-icons-faicon "gamepad"))          nil nil)
+            ("mocap"    ,(list (all-the-icons-faicon "eye"))              nil nil)
+            ("uni"      ,(list (all-the-icons-faicon "graduation-cap"))   nil nil)))
 
-(with-eval-after-load 'org
-  (require 'org-tempo)
-  (setq org-roam-node-display-template
-        (concat "${title:*} "
-                (propertize "${tags}" 'face 'org-tag)))
+    (setq org-agenda-block-separator (string-to-char " "))
+    (setq org-agenda-format-date 'my-org-agenda-format-date-aligned)
+    (setq org-agenda-dim-blocked-tasks 'invisible)
 
-  ;;(add-to-list 'org-latex-packages-alist '("" "tikz" t))
-  ;;(add-to-list 'org-latex-packages-alist '("" "pgfplots" t))
+    (setq org-archive-location "~/org/.archives/%s_archive::")
+
+    (defun my-org-agenda-format-date-aligned (date)
+      "Format a DATE string for display in the daily/weekly agenda, or timeline.
+This function makes sure that dates are aligned for easy reading."
+      (require 'cal-iso)
+      (let* ((dayname (calendar-day-name date 1 nil))
+             (day (cadr date))
+             (month (car date))
+             (monthname (elt calendar-month-name-array (- month 1))))
+        (format "  %-2s. %2d %s"
+                dayname day monthname)))
+
+    (defun format-lectures ()
+      (concat "[ " (nth 0 (org-get-outline-path)) " ]"))
+
+    (defun format-deadlines ()
+      (concat (format-lectures)
+              " <"
+              (org-format-time-string "%d.%m.%Y" (org-get-deadline-time (point)))
+              ">"))
+
+
+    (defun my/org-skip-function (part)
+      "Partitions things to decide if they should go into the agenda '(agenda future-scheduled done)"
+      (let* ((skip (save-excursion (org-entry-end-position)))
+             (dont-skip nil)
+             (deadline (org-get-deadline-time (point)))
+             (deadline-seconds (time-convert deadline 'integer))
+             (time-now (time-convert (current-time) 'integer))
+             (result
+              (or (and deadline
+                       (< time-now (+ deadline-seconds 86400))
+                       ;; 86400 == seconds per day -- basically check if the
+                       ;; deadline time (which maybe was midnight) is today or in
+                       ;; the future
+                       'agenda)
+                  'done)))                 ; Everything else should go in the agenda
+        (if (eq result part) dont-skip skip)))
+
+    (setq org-agenda-custom-commands
+          '(("o" "Plan"
+             ((tags-todo
+               "today"
+               ((org-agenda-remove-tags t)
+                (org-agenda-overriding-header "Other todos today:\n")))
+              (todo ""
+               ((org-agenda-overriding-header "Lectures still to watch:\n")
+                (org-agenda-files '("~/org/uni.org"))
+                (org-agenda-prefix-format   "  %-2i  %-10(format-lectures) ")
+                (org-agenda-skip-function '(org-agenda-skip-entry-if 'deadline 'timestamp))))
+              (tags  "assignments"
+               ((org-agenda-skip-function '(my/org-skip-function 'agenda))
+                (org-agenda-prefix-format   "  %-2i  %-23(format-deadlines) ")
+                (org-agenda-sorting-strategy '(deadline-up))
+                (org-agenda-files '("~/org/uni.org"))
+                (org-agenda-overriding-header "Due assignments:\n")
+                (org-agenda-remove-tags t)))
+              (agenda ""
+               ((org-agenda-start-day "-1d")
+                (org-agenda-span 15)
+                (org-agenda-overriding-header "Agenda:\n")
+                (org-agenda-repeating-timestamp-show-all nil)
+                (org-agenda-remove-tags t)
+                (org-agenda-prefix-format   "    %-2i  %-20b %-11t  %s")
+                (org-agenda-todo-keyword-format "%-1s")
+                (org-agenda-current-time-string "<┈┈┈┈┈┈┈┈┈┈ now ┈┈┈┈┈┈┈┈┈┈>")
+                (org-agenda-deadline-leaders '("Deadline:  " "In %3d t:  " "Vor %2d t: "))
+                (org-agenda-scheduled-leaders '("Scheduled: " "Overdue: "))
+                (org-agenda-time-grid '((daily today remove-match)
+                                        (0800 0900 1000 1100 1200 1300 1400 1500 1600 1700 1800 1900 2000 2100 2200)
+                                        " . . ." "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈"))))))))
+    )
   )
 
-(map! :map org-mode-map
-      "C-r"  'org-roam-node-insert
-      "C-j"  'join-line
-      "C-y"  'my-org-yank)
-
-;; NOTE(Felix): we gotta set org-format-latex-options here after requiring org,
-;;   otherwise if we use with-eval-after-load, it would only get loaded after we
-;;   open the first org file, which at load time would already try to latex
-;;   compile the fragments, before executing the `setq org-format-latex-options'
-;;   it seems ...
-(require 'org)
-(setq org-format-latex-options
-        '(:foreground default :background default :scale 2 :html-foreground "Black" :html-background "Transparent" :html-scale 1.0 :matchers
-                      ("begin" "$1" "$" "$$" "\\(" "\\[")))
-(setq org-preview-latex-image-directory "./images/latex/")
-
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-
-(setq locale-coding-system 'utf-8)
-(set-terminal-coding-system 'utf-8)
-(set-keyboard-coding-system 'utf-8)
-(set-selection-coding-system 'utf-8)
-(prefer-coding-system 'utf-8)
-(set-default-coding-systems 'utf-8)
-
-(with-eval-after-load 'org
-  ;; Allow multiple line Org emphasis markup. Like bold
-  ;; http://emacs.stackexchange.com/a/13828/115
-  (setcar (nthcdr 4 org-emphasis-regexp-components) 20) ;Up to 20 lines, default is just 1
-  ;; Below is needed to apply the modified `org-emphasis-regexp-components'
-  ;; settings from above.
-  (org-set-emph-re 'org-emphasis-regexp-components org-emphasis-regexp-components))
-
-(defun open-my-calendar ()
-  (interactive)
-  (org-agenda nil "o"))
-
-(map! "<f2>" 'open-my-calendar)
-
-(setq! calendar-week-start-day 0
-       calendar-day-name-array ["Sonntag" "Montag" "Dienstag" "Mittwoch"
-                                "Donnerstag" "Freitag" "Samstag"]
-       calendar-month-name-array ["Januar" "Februar" "März" "April" "Mai"
-                                  "Juni" "Juli" "August" "September"
-                                  "Oktober" "November" "Dezember"])
-
-(setq solar-n-hemi-seasons
-      '("Frühlingsanfang" "Sommeranfang" "Herbstanfang" "Winteranfang"))
-
-(setq holiday-general-holidays
-      '((holiday-fixed 1 1 "Neujahr")
-        (holiday-fixed 5 1 "1. Mai")
-        (holiday-fixed 10 3 "Tag der Deutschen Einheit")))
-
-;; Feiertage für Bayern, weitere auskommentiert
-(setq holiday-christian-holidays
-      '((holiday-float 12 0 -4 "1. Advent" 24)
-        (holiday-float 12 0 -3 "2. Advent" 24)
-        (holiday-float 12 0 -2 "3. Advent" 24)
-        (holiday-float 12 0 -1 "4. Advent" 24)
-        (holiday-fixed 12 25 "1. Weihnachtstag")
-        (holiday-fixed 12 26 "2. Weihnachtstag")
-        (holiday-fixed 1 6 "Heilige Drei Könige")
-        (holiday-easter-etc -48 "Rosenmontag")
-        ;; (holiday-easter-etc -3 "Gründonnerstag")
-        (holiday-easter-etc  -2 "Karfreitag")
-        (holiday-easter-etc   0 "Ostersonntag")
-        (holiday-easter-etc  +1 "Ostermontag")
-        (holiday-easter-etc +39 "Christi Himmelfahrt")
-        (holiday-easter-etc +49 "Pfingstsonntag")
-        (holiday-easter-etc +50 "Pfingstmontag")
-        (holiday-easter-etc +60 "Fronleichnam")
-        (holiday-fixed 8 15 "Mariae Himmelfahrt")
-        (holiday-fixed 11 1 "Allerheiligen")
-        ;; (holiday-float 11 3 1 "Buss- und Bettag" 16)
-        (holiday-float 11 0 1 "Totensonntag" 20)))
-
-
-
-(setq org-tags-column -90)
-(setq org-log-done t)
-(setq org-agenda-category-icon-alist
-      `(("teaching" ,(list "\xf130")       nil nil :ascent center)
-        ("pizza"    ,(list (all-the-icons-material "local_pizza"))           nil nil)
-        ("coffee"   ,(list (all-the-icons-faicon "coffee"))           nil nil)
-        ("events"   ,(list (all-the-icons-faicon "calendar-check-o")) nil nil)
-        ("todo"     ,(list (all-the-icons-faicon "check"))            nil nil)
-        ("pprog"    ,(list (all-the-icons-faicon "align-left"))       nil nil)
-        ("dbsys"    ,(list (all-the-icons-faicon "table"))            nil nil)
-        ("gemji"    ,(list (all-the-icons-faicon "gamepad"))          nil nil)
-        ("mocap"    ,(list (all-the-icons-faicon "eye"))              nil nil)
-        ("uni"      ,(list (all-the-icons-faicon "graduation-cap"))   nil nil)))
-
-(setq org-agenda-block-separator (string-to-char " "))
-(setq org-agenda-format-date 'my-org-agenda-format-date-aligned)
-(setq org-agenda-dim-blocked-tasks 'invisible)
-
-(setq org-archive-location "~/org/.archives/%s_archive::")
-
-(defun my-org-agenda-format-date-aligned (date)
-  "Format a DATE string for display in the daily/weekly agenda, or timeline.
-This function makes sure that dates are aligned for easy reading."
-  (require 'cal-iso)
-  (let* ((dayname (calendar-day-name date 1 nil))
-         (day (cadr date))
-         (month (car date))
-         (monthname (elt calendar-month-name-array (- month 1))))
-    (format "  %-2s. %2d %s"
-            dayname day monthname)))
-
-(defun format-lectures ()
-  (concat "[ " (nth 0 (org-get-outline-path)) " ]"))
-
-(defun format-deadlines ()
-  (concat (format-lectures)
-          " <"
-          (org-format-time-string "%d.%m.%Y" (org-get-deadline-time (point)))
-          ">"))
-
-
-(defun my/org-skip-function (part)
-  "Partitions things to decide if they should go into the agenda '(agenda future-scheduled done)"
-  (let* ((skip (save-excursion (org-entry-end-position)))
-         (dont-skip nil)
-         (deadline (org-get-deadline-time (point)))
-         (deadline-seconds (time-convert deadline 'integer))
-         (time-now (time-convert (current-time) 'integer))
-         (result
-          (or (and deadline
-                   (< time-now (+ deadline-seconds 86400))
-                   ;; 86400 == seconds per day -- basically check if the
-                   ;; deadline time (which maybe was midnight) is today or in
-                   ;; the future
-                   'agenda)
-              'done)))                 ; Everything else should go in the agenda
-    (if (eq result part) dont-skip skip)))
-
-(setq org-agenda-custom-commands
-      '(("o" "Plan"
-         ((tags-todo
-           "today"
-           ((org-agenda-remove-tags t)
-            (org-agenda-overriding-header "Other todos today:\n")))
-          (todo ""
-                ((org-agenda-overriding-header "Lectures still to watch:\n")
-                 (org-agenda-files '("~/org/uni.org"))
-                 (org-agenda-prefix-format   "  %-2i  %-10(format-lectures) ")
-                 (org-agenda-skip-function '(org-agenda-skip-entry-if 'deadline 'timestamp))))
-          (tags  "assignments"
-                 ((org-agenda-skip-function '(my/org-skip-function 'agenda))
-                  (org-agenda-prefix-format   "  %-2i  %-23(format-deadlines) ")
-                  (org-agenda-sorting-strategy '(deadline-up))
-                  (org-agenda-files '("~/org/uni.org"))
-                  (org-agenda-overriding-header "Due assignments:\n")
-                  (org-agenda-remove-tags t)))
-          (agenda ""
-                  ((org-agenda-start-day "-1d")
-                   (org-agenda-span 15)
-                   (org-agenda-overriding-header "Agenda:\n")
-                   (org-agenda-repeating-timestamp-show-all nil)
-                   (org-agenda-remove-tags t)
-                   (org-agenda-prefix-format   "    %-2i  %-20b %-11t  %s")
-                   (org-agenda-todo-keyword-format "%-1s")
-                   (org-agenda-current-time-string "<┈┈┈┈┈┈┈┈┈┈ now ┈┈┈┈┈┈┈┈┈┈>")
-                   (org-agenda-deadline-leaders '("Deadline:  " "In %3d t:  " "Vor %2d t: "))
-                   (org-agenda-scheduled-leaders '("Scheduled: " "Overdue: "))
-                   (org-agenda-time-grid '((daily today remove-match)
-                                           (0800 0900 1000 1100 1200 1300 1400 1500 1600 1700 1800 1900 2000 2100 2200)
-                                           " . . ." "┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈┈"))))))))
-
-(setq org-export-babel-evaluate nil)
-
-(setq lang :de)
-(defun change-lang ()
-  (interactive)
-  ;; (keyboard-translate ?z ?y)
-  (if (eq lang :de)
-      (progn
-        (keyboard-translate ?y ?z)  ; For german keyboards
-        (keyboard-translate ?z ?y)
-        (set-input-method 'korean-hangul)
-        (setq lang :kr))
-    (toggle-input-method nil)
-    (keyboard-translate ?y ?y)  ; For german keyboards
-    (keyboard-translate ?z ?z)
-    (setq lang :de)))
-
-
-(setq org-preview-latex-process-alist
-      '((dvipng :programs
-                ("latex" "dvipng")
-                :description "dvi > png" :message "you need to install the programs: latex and dvipng." :image-input-type "dvi" :image-output-type "png" :image-size-adjust
-                (1.0 . 1.0)
-                :latex-compiler
-                ("latex -interaction nonstopmode -output-directory %o %f")
-                :image-converter
-                ("dvipng -D %D -T tight -o %O %f")
-                :transparent-image-converter
-                ("dvipng -D %D -T tight -bg Transparent -o %O %f"))
-        (dvisvgm :programs
-                 ("latex" "dvisvgm")
-                 :description "dvi > svg" :message "you need to install the programs: latex and dvisvgm." :image-input-type "dvi" :image-output-type "svg" :image-size-adjust
-                 (1.7 . 1.5)
-                 :latex-compiler
-                 ("latex -interaction nonstopmode -output-directory %o %f")
-                 :image-converter
-                 ("dvisvgm %f -n -b min -c %S -o %O"))
-        (imagemagick :programs
-                     ("latex" "convert")
-                     :description "pdf > png" :message "you need to install the programs: latex and imagemagick." :image-input-type "pdf" :image-output-type "png" :image-size-adjust
-                     (1.0 . 1.0)
-                     :latex-compiler
-                     ("pdflatex -interaction nonstopmode -output-directory %o %f")
-                     :image-converter
-                     ("convert -density %D -trim -antialias %f -quality 100 %O"))))
-
-(setq org-preview-latex-default-process 'dvisvgm)
-(setq org-html-with-latex 'dvisvgm)
-
-
-(progn
-  ;; Org publish stuff for garden
+(code-region "Org publish stuff for garden"
   (require 'ox-publish)
   (use-package! ox-hugo
     :custom
@@ -760,70 +956,6 @@ This function makes sure that dates are aligned for easy reading."
     ))
 
 
-;; (require 'org)
-;; (add-to-list 'org-latex-default-packages-alist '("" "tikz"     t) t)
-;; (add-to-list 'org-latex-default-packages-alist '("" "pgfplots" t) t)
-;; (add-to-list 'org-latex-default-packages-alist '("" "qcircuit" t) t)
-;; (add-to-list 'org-latex-default-packages-alist '("" "braket" t) t)
-;; (add-to-list 'org-latex-default-packages-alist '("" "blochsphere" t) t)
-
-;; (setq org-babel-latex-preamble
-;;       (lambda (_)
-;;         "\\documentclass{article}
-
-;; \\usepackage[usenames]{color}
-;; \\usepackage[utf8]{inputenc}
-;; \\usepackage[T1]{fontenc}
-;; \\usepackage{graphicx}
-;; \\usepackage{longtable}
-;; \\usepackage{wrapfig}
-;; \\usepackage{rotating}
-;; \\usepackage[normalem]{ulem}
-;; \\usepackage{amsmath}
-;; \\usepackage{amssymb}
-;; \\usepackage{capt-of}
-;; \\usepackage{tikz}
-;; \\usetikzlibrary{arrows.meta}
-;; \\usepackage{pgfplots}
-;; \\usepackage{qcircuit}
-;; \\usepackage{braket}
-;; \\usepackage{blochsphere}
-
-;; \\pgfplotsset{compat=1.18}
-;; \\pagestyle{empty}             % do not remove
-
-
-;; % The settings below are copied from fullpage.sty
-;; \\setlength{\\textwidth}{\\paperwidth}
-;; \\addtolength{\\textwidth}{-3cm}
-;; \\setlength{\\oddsidemargin}{1.5cm}
-;; \\addtolength{\\oddsidemargin}{-2.54cm}
-;; \\setlength{\\evensidemargin}{\\oddsidemargin}
-;; \\setlength{\\textheight}{\\paperheight}
-;; \\addtolength{\\textheight}{-\\headheight}
-;; \\addtolength{\\textheight}{-\\headsep}
-;; \\addtolength{\\textheight}{-\\footskip}
-;; \\addtolength{\\textheight}{-3cm}
-;; \\setlength{\\topmargin}{1.5cm}
-;; \\addtolength{\\topmargin}{-2.54cm}
-;; "))
-
-;; (setq org-latex-pdf-process
-;;       '("%latex -interaction nonstopmode -output-directory %o %f"
-;;       "%latex -interaction nonstopmode -output-directory %o %f"
-;;       "%latex -interaction nonstopmode -output-directory %o %f"))
-
-(with-eval-after-load 'ox-html
-  (setq org-html-head
-        (replace-regexp-in-string
-         ".org-svg { width: 90%; }"
-         ".org-svg { width: auto; }"
-         org-html-style-default)))
-
-(add-to-list 'org-export-exclude-tags "toc")
-(add-to-list 'org-latex-packages-alist '("" "tikz" t) t)
-(add-to-list 'org-latex-packages-alist '("" "pgfplots" t) t)
-
 
 (defun delete-trailing-whitespace-except-current-line ()
   (interactive)
@@ -841,28 +973,29 @@ This function makes sure that dates are aligned for easy reading."
 (add-hook 'before-save-hook 'delete-trailing-whitespace-except-current-line)
 
 
+(code-region "Korean input"
+  (setq lang :de)
+  (defun change-lang ()
+    (interactive)
+    ;; (keyboard-translate ?z ?y)
+    (if (eq lang :de)
+        (progn
+          (keyboard-translate ?y ?z)  ; For german keyboards
+          (keyboard-translate ?z ?y)
+          (set-input-method 'korean-hangul)
+          (setq lang :kr))
+      (toggle-input-method nil)
+      (keyboard-translate ?y ?y)  ; For german keyboards
+      (keyboard-translate ?z ?z)
+      (setq lang :de)))
+  )
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 ;; startup
-(add-hook 'window-setup-hook
-          (lambda ()
-            (neotree-toggle)
-            (neotree-dir "~/../../org/")
-            (neotree-refresh)
-            (other-window 1)))
-
-
-(setq lang :de)
-(defun change-lang ()
-  (interactive)
-  ;; (keyboard-translate ?z ?y)
-  (if (eq lang :de)
-      (progn
-        (keyboard-translate ?y ?z)  ; For german keyboards
-        (keyboard-translate ?z ?y)
-        (set-input-method 'korean-hangul)
-        (setq lang :kr))
-    (toggle-input-method nil)
-    (keyboard-translate ?y ?y)  ; For german keyboards
-    (keyboard-translate ?z ?z)
-    (setq lang :de)))
+;; (add-hook 'window-setup-hook
+;;           (lambda ()
+;;             (neotree-toggle)
+;;             (neotree-dir "~/../../org/")
+;;             (neotree-refresh)
+;;             (other-window 1)))

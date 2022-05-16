@@ -7,6 +7,4 @@ set HOME=%~dp0emacs\home
 
 call doom env
 
-cmd
-
 emacs\bin\runemacs.exe
