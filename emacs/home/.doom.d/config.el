@@ -132,6 +132,9 @@
    '(("d" "General Notes" plain "%?" :target
       (file+head "${slug}.org" "#+title: ${title}\n")
       :unnarrowed t)
+     ("k" "Korean" plain "%?" :target
+      (file+head "Korean/${slug}.org" "#+title: ${title}\n\n")
+      :unnarrowed t)
      ("a" "Notes for APIs")
      ("aw" "Win32 API" plain "%?" :target
       (file+head "APIs/win32/${slug}.org" "#+title: [win32] ${title}\n#+filetags: :win32:\n")
@@ -277,6 +280,7 @@ Performs a database upgrade when required."
       "<f1>"        '+doom-dashboard/open
       "C-r"         'org-roam-node-insert
       "C-o"         'org-roam-node-find
+      "M-SPC"       'change-lang
       )
 
 ;; NOTE(Felix): make C-c f p not throw errors by rebinding it
@@ -846,3 +850,19 @@ This function makes sure that dates are aligned for easy reading."
             (neotree-dir "~/../../org/")
             (neotree-refresh)
             (other-window 1)))
+
+
+(setq lang :de)
+(defun change-lang ()
+  (interactive)
+  ;; (keyboard-translate ?z ?y)
+  (if (eq lang :de)
+      (progn
+        (keyboard-translate ?y ?z)  ; For german keyboards
+        (keyboard-translate ?z ?y)
+        (set-input-method 'korean-hangul)
+        (setq lang :kr))
+    (toggle-input-method nil)
+    (keyboard-translate ?y ?y)  ; For german keyboards
+    (keyboard-translate ?z ?z)
+    (setq lang :de)))
