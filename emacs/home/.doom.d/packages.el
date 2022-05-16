@@ -55,6 +55,7 @@
 (package! org-fragtog)
 (package! biblio)
 (package! ox-hugo)
+(package! ssh-agency)
 
 (package! kuronami-theme :recipe (:host github :repo "super3ggo/kuronami"      :files ("kuronami-theme.el")))
 

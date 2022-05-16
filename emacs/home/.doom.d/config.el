@@ -104,6 +104,8 @@
 (use-package! company-posframe
   :config
   (company-posframe-mode 1))
+(use-package! ssh-agency
+  :defer t)
 (use-package! valign)
 (use-package! biblio)
 (use-package org-fragtog
